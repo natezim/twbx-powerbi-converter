@@ -53,51 +53,53 @@ python main.py
 POWER BI SETUP GUIDE
 ==================
 
-Data Source: federated.14u9jyo1x4rfq40zzuj6c1nmag30
-Caption: nfl_teams (postgres)
-Fields Available: 75
-Fields Used in Workbook: 12
+Data Source: federated.sample_datasource_id
+Caption: Sample Database (postgres)
+Fields Available: 45
+Fields Used in Workbook: 8
 
 CONNECTION DETAILS:
 ------------------
 Connection 1:
-  Server: aws-0-us-east-1.pooler.supabase.com
-  Database: postgres
-  Username: postgres.wlmdmpgnmadyuvsiztyx
+  Server: sample-server.database.com
+  Database: sample_db
+  Username: sample_user
   Type: postgres
   Port: 5432
 
 TABLES TO IMPORT:
 ----------------
-  props_teams as Away
-  nfl_teams as Away Teams
-  props_teams as Home
-  nfl_teams as Home Teams
-  nfl_dimers_lines
+  customers as Customer
+  orders as Order
+  products as Product
+  categories as Category
 
-MAIN TABLE: nfl_dimers_lines (aliased as nfl_dimers_lines)
+MAIN TABLE: orders (aliased as Order)
 
 CREATE THESE RELATIONSHIPS IN POWER BI MODEL VIEW:
 ------------------------------------------------
-1. LEFT JOIN props_teams AS Home ON props_teams.abbr = nfl_teams AS "Home Teams".team_abbr
-2. LEFT JOIN nfl_dimers_lines AS nfl_dimers_lines ON nfl_dimers_lines.away_team = props_teams AS Away.abbr
+1. LEFT JOIN customers AS Customer ON customers.customer_id = orders.customer_id
+2. LEFT JOIN products AS Product ON products.product_id = orders.product_id
+3. LEFT JOIN categories AS Category ON categories.category_id = products.category_id
 
 SQL COLUMNS:
 
--- Away Teams:
-  "Away Teams".team_logo_squared as 'team_logo_squared (nfl_teams)',
+-- Customer:
+  Customer.customer_name as customer_name,
+  Customer.email as email,
+  Customer.phone as phone,
 
--- Home:
-  Home.full_name as full_name,
+-- Order:
+  Order.order_id as order_id,
+  Order.order_date as order_date,
+  Order.total_amount as total_amount,
 
--- Home Teams:
-  "Home Teams".team_division as team_division,
-  "Home Teams".team_logo_squared as team_logo_squared,
+-- Product:
+  Product.product_name as product_name,
+  Product.price as price,
 
--- nfl_dimers_lines:
-  nfl_dimers_lines.away_team as away_team,
-  nfl_dimers_lines.date as date,
-  nfl_dimers_lines.game_id as game_id,
+-- Category:
+  Category.category_name as category_name
 ```
 
 ## Project Structure
