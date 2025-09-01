@@ -1,0 +1,10 @@
+# Tableau to Power BI Migration Tool Dependencies
+# Install with: pip install -r requirements.txt
+
+xmltodict==0.13.0
+lxml==4.9.3
+
+# Note: tkinter is included with Python by default
+# If you get import errors, install with: pip install tk
+
+tableaudocumentapi>=0.15.0
