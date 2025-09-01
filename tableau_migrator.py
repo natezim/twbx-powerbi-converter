@@ -260,7 +260,7 @@ SELECT * FROM your_table_name;""",
         return sql_queries
     
     def export_sql_files(self, output_dir, data_sources):
-        """Save one .sql file per data source with clean, practical structure."""
+        """Save one .sql file per data source with clean, simple structure."""
         os.makedirs(output_dir, exist_ok=True)
         
         for ds in data_sources:
@@ -289,45 +289,19 @@ SELECT * FROM your_table_name;""",
                                 f.write(f"--   {key}: {value}\n")
                         f.write("\n")
                 
-                # Field information
-                if ds['fields']:
-                    f.write("-- AVAILABLE FIELDS\n")
-                    f.write("-- " + "-"*30 + "\n")
-                    for field in ds['fields'][:20]:  # Show first 20 fields
-                        f.write(f"-- {field['name']} ({field['datatype']}) - {field['role']} - Table: {field['table_name']}\n")
-                    
-                    if ds['field_count'] > 20:
-                        f.write(f"-- ... and {ds['field_count'] - 20} more fields\n")
-                    f.write("\n")
-                
-                # SQL queries
-                f.write("-- SQL QUERIES\n")
-                f.write("-- " + "="*30 + "\n\n")
-                
-                sql_queries = self.generate_practical_sql(ds)
-                for i, query in enumerate(sql_queries, 1):
-                    f.write(f"-- {query['name']} ({query['type']})\n")
-                    f.write("-- " + "-"*30 + "\n")
-                    f.write(query['sql'])
-                    f.write("\n\n")
-                
-                # Power BI instructions
-                f.write("-- POWER BI MIGRATION INSTRUCTIONS\n")
-                f.write("-- " + "="*30 + "\n")
+                # Simple Power BI instructions
+                f.write("-- POWER BI SETUP\n")
+                f.write("-- " + "-"*30 + "\n")
                 if ds['connections'] and any(conn['dbclass'] in ['postgres', 'sqlserver', 'oracle', 'mysql'] for conn in ds['connections']):
-                    f.write("-- 1. Use the connection details above to connect to your database\n")
-                    f.write("-- 2. Import the tables you need\n")
-                    f.write("-- 3. Create relationships in Power BI Model view\n")
-                    f.write("-- 4. Use the field mapping CSV for column mapping\n")
+                    f.write("-- 1. Use connection details above to connect to database\n")
+                    f.write("-- 2. Import tables as needed\n")
+                    f.write("-- 3. Use field mapping CSV for column details\n")
                 elif ds['connections'] and any(conn['filename'] for conn in ds['connections']):
-                    f.write("-- 1. Import the files directly into Power BI\n")
-                    f.write("-- 2. Create relationships in Power BI Model view\n")
-                    f.write("-- 3. Use the field mapping CSV for column mapping\n")
+                    f.write("-- 1. Import files directly into Power BI\n")
+                    f.write("-- 2. Use field mapping CSV for column details\n")
                 else:
-                    f.write("-- 1. Connect to your data source\n")
-                    f.write("-- 2. Import the fields you need\n")
-                    f.write("-- 3. Create relationships in Power BI as needed\n")
-                    f.write("-- 4. Use the field mapping CSV for column mapping\n")
+                    f.write("-- 1. Connect to data source\n")
+                    f.write("-- 2. Use field mapping CSV for column details\n")
             
             print(f"✅ Created: {sql_file}")
 
@@ -337,52 +311,62 @@ def main():
     print("🔍 Tableau Data Source Extractor (Official API + XML Metadata)")
     print("=" * 70)
     
-    # Test with NFL Dashboard
-    nfl_file = "NFL Dashboard.twbx"
+    # Find all TWBX files in current directory
+    twbx_files = [f for f in os.listdir('.') if f.endswith('.twbx')]
     
-    if not os.path.exists(nfl_file):
-        print(f"❌ File not found: {nfl_file}")
-        print("Please place the NFL Dashboard.twbx file in the current directory")
+    if not twbx_files:
+        print("❌ No .twbx files found in current directory")
+        print("Please place one or more .twbx files in the current directory")
         return
     
-    print(f"📂 Processing: {nfl_file}")
+    print(f"📂 Found {len(twbx_files)} TWBX file(s): {', '.join(twbx_files)}")
+    print()
     
-    try:
-        extractor = TableauDataSourceExtractor(nfl_file)
+    # Process each TWBX file
+    for twbx_file in twbx_files:
+        print(f"🔄 Processing: {twbx_file}")
+        print("-" * 50)
         
-        if extractor.extract_and_parse():
-            print("✅ TWBX parsed successfully using official Tableau API + XML")
+        try:
+            extractor = TableauDataSourceExtractor(twbx_file)
             
-            print("🔍 Analyzing data sources...")
-            data_sources = extractor.extract_data_sources()
-            
-            for ds in data_sources:
-                print(f"✅ Found: {ds['caption']} ({ds['name']})")
-                print(f"   Connections: {len(ds['connections'])}")
-                print(f"   Fields: {ds['field_count']}")
+            if extractor.extract_and_parse():
+                print("✅ TWBX parsed successfully using official Tableau API + XML")
                 
-                for conn in ds['connections']:
-                    if conn['dbclass']:
-                        print(f"     - {conn['dbclass']}: {conn['server']}/{conn['dbname']}")
-                    elif conn['filename']:
-                        print(f"     - File: {conn['filename']}")
-                print()
-            
-            print("💾 Exporting SQL files...")
-            extractor.export_sql_files("output", data_sources)
-            
-            print("📊 Exporting field mapping CSV...")
-            extractor.export_field_mapping_csv("output", data_sources)
-            
-            print("✅ Extraction complete!")
-            
-        else:
-            print("❌ Failed to parse TWBX file")
+                print("🔍 Analyzing data sources...")
+                data_sources = extractor.extract_data_sources()
+                
+                for ds in data_sources:
+                    print(f"✅ Found: {ds['caption']} ({ds['name']})")
+                    print(f"   Connections: {len(ds['connections'])}")
+                    print(f"   Fields: {ds['field_count']}")
+                    
+                    for conn in ds['connections']:
+                        if conn['dbclass']:
+                            print(f"     - {conn['dbclass']}: {conn['server']}/{conn['dbname']}")
+                        elif conn['filename']:
+                            print(f"     - File: {conn['filename']}")
+                    print()
+                
+                print("💾 Exporting SQL files...")
+                extractor.export_sql_files("output", data_sources)
+                
+                print("📊 Exporting field mapping CSV...")
+                extractor.export_field_mapping_csv("output", data_sources)
+                
+                print(f"✅ Extraction complete for {twbx_file}!")
+                
+            else:
+                print(f"❌ Failed to parse {twbx_file}")
+        
+        except Exception as e:
+            print(f"❌ Error processing {twbx_file}: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        print()  # Add spacing between files
     
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
+    print("🎉 All TWBX files processed!")
 
 
 if __name__ == "__main__":
