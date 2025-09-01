@@ -1,0 +1,76 @@
+Original_Field_Name,Tableau_Field_Name,Data_Type,Table_Name,Table_Reference_SQL,Used_In_Workbook
+abbr,abbr (props_teams),string,Away,'Away.abbr',No
+conference,conference (props_teams),string,Away,'Away.conference',No
+display_name,display_name (props_teams),string,Away,'Away.display_name',No
+division,division (props_teams),string,Away,'Away.division',No
+full_name,full_name (props_teams),string,Away,'Away.full_name',No
+id,id (props_teams) #1,integer,Away,'Away.id',No
+logo,logo (props_teams),string,Away,'Away.logo',No
+team_id,team_id (props_teams),string,Away,'Away.team_id',No
+created_date,created_date (nfl_teams),date,Away Teams,'Away Teams.created_date',No
+team_abbr,team_abbr (nfl_teams),string,Away Teams,'Away Teams.team_abbr',No
+team_color,team_color (nfl_teams),string,Away Teams,'Away Teams.team_color',No
+team_color2,team_color2 (nfl_teams),string,Away Teams,'Away Teams.team_color2',No
+team_color3,team_color3 (nfl_teams),string,Away Teams,'Away Teams.team_color3',No
+team_color4,team_color4 (nfl_teams),string,Away Teams,'Away Teams.team_color4',No
+team_conf,team_conf (nfl_teams),string,Away Teams,'Away Teams.team_conf',No
+team_conference_logo,team_conference_logo (nfl_teams),string,Away Teams,'Away Teams.team_conference_logo',No
+team_division,team_division (nfl_teams),string,Away Teams,'Away Teams.team_division',No
+team_id,team_id (nfl_teams) #1,integer,Away Teams,'Away Teams.team_id',No
+team_league_logo,team_league_logo (nfl_teams),string,Away Teams,'Away Teams.team_league_logo',No
+team_logo_espn,team_logo_espn (nfl_teams),string,Away Teams,'Away Teams.team_logo_espn',No
+team_logo_squared,team_logo_squared (nfl_teams),string,Away Teams,'Away Teams.team_logo_squared',Yes
+team_logo_wikipedia,team_logo_wikipedia (nfl_teams),string,Away Teams,'Away Teams.team_logo_wikipedia',No
+team_name,team_name (nfl_teams),string,Away Teams,'Away Teams.team_name',No
+team_nick,team_nick (nfl_teams),string,Away Teams,'Away Teams.team_nick',No
+team_wordmark,team_wordmark (nfl_teams),string,Away Teams,'Away Teams.team_wordmark',No
+updated_date,updated_date (nfl_teams),date,Away Teams,'Away Teams.updated_date',No
+abbr,abbr,string,Home,'Home.abbr',No
+conference,conference,string,Home,'Home.conference',No
+display_name,display_name,string,Home,'Home.display_name',No
+division,division,string,Home,'Home.division',No
+full_name,full_name,string,Home,'Home.full_name',Yes
+id,id (props_teams),integer,Home,'Home.id',No
+logo,logo,string,Home,'Home.logo',No
+team_id,team_id,string,Home,'Home.team_id',No
+created_date,created_date,date,Home Teams,'Home Teams.created_date',No
+team_abbr,team_abbr,string,Home Teams,'Home Teams.team_abbr',No
+team_color,team_color,string,Home Teams,'Home Teams.team_color',No
+team_color2,team_color2,string,Home Teams,'Home Teams.team_color2',No
+team_color3,team_color3,string,Home Teams,'Home Teams.team_color3',No
+team_color4,team_color4,string,Home Teams,'Home Teams.team_color4',No
+team_conf,team_conf,string,Home Teams,'Home Teams.team_conf',No
+team_conference_logo,team_conference_logo,string,Home Teams,'Home Teams.team_conference_logo',No
+team_division,team_division,string,Home Teams,'Home Teams.team_division',Yes
+team_id,team_id (nfl_teams),integer,Home Teams,'Home Teams.team_id',No
+team_league_logo,team_league_logo,string,Home Teams,'Home Teams.team_league_logo',No
+team_logo_espn,team_logo_espn,string,Home Teams,'Home Teams.team_logo_espn',No
+team_logo_squared,team_logo_squared,string,Home Teams,'Home Teams.team_logo_squared',Yes
+team_logo_wikipedia,team_logo_wikipedia,string,Home Teams,'Home Teams.team_logo_wikipedia',No
+team_name,team_name,string,Home Teams,'Home Teams.team_name',No
+team_nick,team_nick,string,Home Teams,'Home Teams.team_nick',No
+team_wordmark,team_wordmark,string,Home Teams,'Home Teams.team_wordmark',No
+updated_date,updated_date,date,Home Teams,'Home Teams.updated_date',No
+away_team,away_team,string,nfl_dimers_lines,'nfl_dimers_lines.away_team',Yes
+away_win_pct,away_win_pct,real,nfl_dimers_lines,'nfl_dimers_lines.away_win_pct',No
+books,books,string,nfl_dimers_lines,'nfl_dimers_lines.books',No
+consensus_away_line,consensus_away_line,real,nfl_dimers_lines,'nfl_dimers_lines.consensus_away_line',No
+consensus_away_line_win_pct,consensus_away_line_win_pct,real,nfl_dimers_lines,'nfl_dimers_lines.consensus_away_line_win_pct',No
+consensus_home_line,consensus_home_line,real,nfl_dimers_lines,'nfl_dimers_lines.consensus_home_line',No
+consensus_home_line_win_pct,consensus_home_line_win_pct,real,nfl_dimers_lines,'nfl_dimers_lines.consensus_home_line_win_pct',No
+consensus_over_win_pct,consensus_over_win_pct,real,nfl_dimers_lines,'nfl_dimers_lines.consensus_over_win_pct',No
+consensus_total,consensus_total,real,nfl_dimers_lines,'nfl_dimers_lines.consensus_total',No
+consensus_under_win_pct,consensus_under_win_pct,real,nfl_dimers_lines,'nfl_dimers_lines.consensus_under_win_pct',No
+created_at,created_at,datetime,nfl_dimers_lines,'nfl_dimers_lines.created_at',No
+date,date,datetime,nfl_dimers_lines,'nfl_dimers_lines.date',Yes
+game_id,game_id,string,nfl_dimers_lines,'nfl_dimers_lines.game_id',Yes
+home_team,home_team,string,nfl_dimers_lines,'nfl_dimers_lines.home_team',No
+home_win_pct,home_win_pct,real,nfl_dimers_lines,'nfl_dimers_lines.home_win_pct',Yes
+id,id,integer,nfl_dimers_lines,'nfl_dimers_lines.id',No
+pre_data_updated,pre_data_updated,datetime,nfl_dimers_lines,'nfl_dimers_lines.pre_data_updated',No
+pred_away_score,pred_away_score,real,nfl_dimers_lines,'nfl_dimers_lines.pred_away_score',Yes
+pred_home_score,pred_home_score,real,nfl_dimers_lines,'nfl_dimers_lines.pred_home_score',Yes
+pred_margin,pred_margin,real,nfl_dimers_lines,'nfl_dimers_lines.pred_margin',Yes
+season,season,integer,nfl_dimers_lines,'nfl_dimers_lines.season',No
+venue,venue,string,nfl_dimers_lines,'nfl_dimers_lines.venue',Yes
+week,week,integer,nfl_dimers_lines,'nfl_dimers_lines.week',No
