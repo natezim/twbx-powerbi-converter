@@ -48,12 +48,21 @@ class CSVExporter:
             safe_name = ''.join(c for c in safe_name if c.isalnum() or c in '_-')
             csv_file = os.path.join(output_dir, f"{safe_name}_field_mapping.csv")
             
-            # Sort fields by table name first, then by column name
-            sorted_fields = sorted(ds['fields'], key=lambda x: (x.get('table_name', ''), x.get('remote_name', '')))
+                            # Sort fields by table name first, then by column name
+            # Put calculated fields at the end since they don't have table names
+            sorted_fields = sorted(ds['fields'], key=lambda x: (
+                x.get('is_calculated', False),  # Calculated fields last
+                x.get('table_name', ''), 
+                x.get('remote_name', '')
+            ))
             
-            # Write CSV with field mapping including usage
+            # Debug: Show calculated fields
+            calc_fields = [f for f in ds['fields'] if f.get('is_calculated', False)]
+            print(f"   CSV Export: Found {len(calc_fields)} calculated fields: {[f.get('name', 'Unknown') for f in calc_fields]}")
+            
+            # Write CSV with field mapping including usage and calculated field info
             with open(csv_file, 'w', newline='', encoding='utf-8') as csvfile:
-                fieldnames = ['Original_Field_Name', 'Tableau_Field_Name', 'Data_Type', 'Table_Name', 'Table_Reference_SQL', 'Used_In_Workbook']
+                fieldnames = ['Original_Field_Name', 'Tableau_Field_Name', 'Data_Type', 'Table_Name', 'Table_Reference_SQL', 'Used_In_Workbook', 'Is_Calculated', 'Calculation_Formula']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 
                 # Write header
@@ -62,16 +71,25 @@ class CSVExporter:
                 # Write field mapping data in sorted order
                 for field in sorted_fields:
                     # Clean up field names for better readability
-                    original_name = field.get('remote_name', '').strip()
-                    tableau_name = field.get('name', '').strip()
+                    original_name = field.get('remote_name', '') or ''
+                    original_name = original_name.strip() if original_name else ''
+                    tableau_name = field.get('name', '') or ''
+                    tableau_name = tableau_name.strip() if tableau_name else ''
+                    is_calculated = field.get('is_calculated', False)
+                    calculation_formula = field.get('calculation_formula', '') or ''
+                    
+                    # For calculated fields, we might not have original_name
+                    if is_calculated and not original_name:
+                        original_name = tableau_name  # Use tableau name as original for calculated fields
                     
                     # Ensure we have valid data
-                    if not original_name or not tableau_name:
+                    if not tableau_name:
                         continue
                     
                     # Format table reference as 'Table.field_name as tableau_name'
-                    table_ref = field.get('table_reference', '').strip()
-                    if table_ref and original_name:
+                    table_ref = field.get('table_reference', '') or ''
+                    table_ref = table_ref.strip() if table_ref else ''
+                    if table_ref and original_name and not is_calculated:
                         if table_ref != tableau_name:
                             # Field was renamed in Tableau - add quotes around tableau_name if it has spaces
                             if ' ' in tableau_name:
@@ -81,9 +99,13 @@ class CSVExporter:
                         else:
                             # Field wasn't renamed, just use original
                             table_ref_sql = f"{table_ref}.{original_name}"
+                    elif is_calculated:
+                        # For calculated fields, show the actual Tableau field name
+                        tableau_display_name = field.get('name', tableau_name)
+                        table_ref_sql = f"CALCULATED: {tableau_display_name}"
                     else:
                         # Use table_name as fallback
-                        table_name = field.get('table_name', 'Unknown')
+                        table_name = field.get('table_name', 'Unknown') or 'Unknown'
                         table_ref_sql = f"{table_name}.{original_name}"
                     
                     # Clean up any special characters that might cause CSV issues
@@ -92,13 +114,26 @@ class CSVExporter:
                     # Mark if field is used in the workbook
                     used_status = 'Yes' if field.get('used_in_workbook', False) else 'No'
                     
+                    # Mark if field is calculated
+                    calculated_status = 'Yes' if is_calculated else 'No'
+                    
+                    # Clean up calculation formula for CSV
+                    clean_formula = calculation_formula.replace('\n', ' ').replace('\r', ' ').replace('"', "'") if calculation_formula else ''
+                    
+                    # For calculated fields, use "Workbook" as table name instead of "Unknown"
+                    table_name_for_csv = field.get('table_name', 'Unknown')
+                    if is_calculated and (table_name_for_csv == 'Unknown' or not table_name_for_csv):
+                        table_name_for_csv = 'Workbook'
+                    
                     writer.writerow({
                         'Original_Field_Name': original_name,
                         'Tableau_Field_Name': tableau_name,
                         'Data_Type': field.get('datatype', 'Unknown'),
-                        'Table_Name': field.get('table_name', 'Unknown'),
+                        'Table_Name': table_name_for_csv,
                         'Table_Reference_SQL': table_ref_sql,
-                        'Used_In_Workbook': used_status
+                        'Used_In_Workbook': used_status,
+                        'Is_Calculated': calculated_status,
+                        'Calculation_Formula': clean_formula
                     })
             
             print(f"✅ Created field mapping CSV: {csv_file}")
@@ -118,9 +153,11 @@ class CSVExporter:
                 f.write(f"Caption: {datasource_info.get('caption', 'N/A')}\n")
                 f.write(f"Fields Available: {datasource_info.get('field_count', 0)}\n")
                 
-                # Count used fields
+                # Count used fields and calculated fields
                 used_fields = sum(1 for field in datasource_info.get('fields', []) if field.get('used_in_workbook', False))
-                f.write(f"Fields Used in Workbook: {used_fields}\n\n")
+                calculated_fields = sum(1 for field in datasource_info.get('fields', []) if field.get('is_calculated', False))
+                f.write(f"Fields Used in Workbook: {used_fields}\n")
+                f.write(f"Calculated Fields: {calculated_fields}\n\n")
                 
                 # Connection details
                 if datasource_info.get('connections'):
@@ -232,6 +269,28 @@ class CSVExporter:
                              if field.get('used_in_workbook', False) and 
                              field.get('table_reference') and  # Must have a table reference (not calculated)
                              field.get('remote_name')]  # Must have an original field name
+                
+                # Calculated fields section
+                calculated_fields = [field for field in datasource_info.get('fields', []) 
+                                   if field.get('is_calculated', False) and 
+                                   field.get('used_in_workbook', False)]
+                
+                if calculated_fields:
+                    f.write(f"\n")
+                    f.write(f"CALCULATED FIELDS:\n")
+                    f.write(f"------------------\n")
+                    
+                    # Sort calculated fields by name
+                    sorted_calc_fields = sorted(calculated_fields, key=lambda x: x.get('name', ''))
+                    
+                    for field in sorted_calc_fields:
+                        field_name = field.get('name', '').strip()
+                        formula = field.get('calculation_formula', '').strip()
+                        data_type = field.get('data_type', 'Unknown')
+                        role = field.get('role', 'Unknown')
+                        
+                        f.write(f"{field_name} ({data_type}, {role}):\n")
+                        f.write(f"  {formula}\n\n")
                 
                 if used_fields:
                     f.write(f"\n")

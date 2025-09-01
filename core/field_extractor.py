@@ -88,6 +88,9 @@ class FieldExtractor:
                                     'used_in_workbook': False
                                 }
                 
+                # Extract calculated fields from workbook XML
+                self.extract_calculated_fields_from_workbook(field_metadata)
+                
                 # Now check for field usage across the entire workbook
                 self.track_field_usage(field_metadata)
                 break
@@ -119,3 +122,96 @@ class FieldExtractor:
                                 if metadata_key in clean_field_name or clean_field_name in metadata_key:
                                     field_metadata[metadata_key]['used_in_workbook'] = True
                                     break
+
+    def extract_calculated_fields_from_workbook(self, field_metadata):
+        """Extract calculated field information from workbook XML."""
+        if not self.xml_root:
+            return
+        
+        print(f"🔍 Looking for calculated fields in workbook XML...")
+        
+        # Look for calculated fields in the workbook XML
+        calculated_columns = self.xml_root.findall('.//column[calculation]')
+        print(f"   Found {len(calculated_columns)} columns with calculations in workbook XML")
+        
+        for column in calculated_columns:
+            # Get the actual field name from the XML attributes (like field.py does)
+            column_name = column.get('name', '')
+            if not column_name:
+                continue
+            
+            # Clean the name (remove brackets) - this is the actual field name
+            clean_name = column_name.replace('[', '').replace(']', '')
+            
+            # Get the caption (display name) if available
+            caption = column.get('caption', clean_name)
+            
+            print(f"   Processing calculated field: {clean_name}")
+            print(f"     Caption: {caption}")
+            
+            # Check if this column has a calculation
+            calculation_elem = column.find('calculation')
+            if calculation_elem is not None:
+                formula = calculation_elem.get('formula', '')
+                calc_class = calculation_elem.get('class', 'tableau')
+                
+                print(f"     Formula: {formula[:50]}{'...' if len(formula) > 50 else ''}")
+                print(f"     Class: {calc_class}")
+                
+                # Check if this field already exists in metadata and update it
+                if clean_name in field_metadata:
+                    print(f"     Updating existing field: {clean_name}")
+                    field_metadata[clean_name].update({
+                        'is_calculated': True,
+                        'calculation_formula': formula,
+                        'calculation_class': calc_class,
+                        'table_reference': None,  # Calculated fields don't have table references
+                        'remote_name': None,  # Calculated fields don't have remote names
+                        'used_in_workbook': True  # Mark calculated fields as used since they exist in the workbook
+                    })
+                else:
+                    print(f"     Field {clean_name} not found in metadata, checking for partial matches...")
+                    # Try to find partial matches in the metadata
+                    found_match = False
+                    for metadata_key in field_metadata.keys():
+                        if clean_name in metadata_key or metadata_key in clean_name:
+                            print(f"     Found partial match: {metadata_key} -> updating as calculated field")
+                            field_metadata[metadata_key].update({
+                                'is_calculated': True,
+                                'calculation_formula': formula,
+                                'calculation_class': calc_class,
+                                'table_reference': None,
+                                'remote_name': None,
+                                'used_in_workbook': True
+                            })
+                            found_match = True
+                            break
+                    
+                    if not found_match:
+                        print(f"     Creating new calculated field with caption: {caption}")
+                        # Create new calculated field entry using the caption (display name) as the key
+                        field_metadata[caption] = {
+                            'name': caption,  # Use caption as the field name (what users see in Tableau)
+                            'caption': caption,  # This is the display name
+                            'datatype': column.get('datatype', 'Unknown'),
+                            'role': column.get('role', 'Unknown'),
+                            'type': column.get('type', 'Unknown'),
+                            'is_calculated': True,
+                            'calculation_formula': formula,
+                            'calculation_class': calc_class,
+                            'table_reference': None,  # Calculated fields don't have table references
+                            'remote_name': None,  # Calculated fields don't have remote names
+                            'used_in_workbook': True,  # Mark calculated fields as used since they exist in the workbook
+                            'data_type': column.get('datatype', 'Unknown'),
+                            'parent_table': 'Workbook',  # Calculated fields are created in the workbook
+                            'table_name': 'Workbook'  # Set table name to Workbook for calculated fields
+                        }
+        
+        # Count calculated fields
+        calc_count = sum(1 for field in field_metadata.values() if field.get('is_calculated', False))
+        print(f"   Total calculated fields in metadata: {calc_count}")
+        
+        # Debug: Show some field names in metadata
+        print(f"   Sample fields in metadata: {list(field_metadata.keys())[:5]}")
+        if calc_count > 0:
+            print(f"   Calculated field names: {[k for k, v in field_metadata.items() if v.get('is_calculated', False)]}")

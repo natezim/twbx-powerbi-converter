@@ -129,7 +129,10 @@ class TableauMigrator:
                     'table_name': metadata.get('table_name', 'Unknown'),
                     'remote_name': metadata.get('remote_name', field_name),
                     'table_reference': metadata.get('table_reference', field_name),
-                    'used_in_workbook': metadata.get('used_in_workbook', False)
+                    'used_in_workbook': metadata.get('used_in_workbook', False),
+                    'is_calculated': metadata.get('is_calculated', False),
+                    'calculation_formula': metadata.get('calculation_formula', ''),
+                    'calculation_class': metadata.get('calculation_class', '')
                 }
                 ds_info['fields'].append(field_info)
             
