@@ -77,6 +77,7 @@ class TableauMigrator:
         
         # Initialize extractors
         self.field_extractor = FieldExtractor(xml_root, workbook)
+        self.xml_root = xml_root
         self.sql_generator = SQLGenerator(xml_root)
         
         data_sources = []
@@ -108,6 +109,13 @@ class TableauMigrator:
             xml_metadata = self.field_extractor.extract_field_metadata(datasource.name)
             print(f"   Found {len(xml_metadata)} fields with rich metadata from XML")
             
+            # Extract calculated fields from workbook XML
+            self.field_extractor.extract_calculated_fields_from_workbook(xml_metadata)
+            
+            # Get dashboard and worksheet information
+            dashboard_info = self.field_extractor.extract_dashboard_worksheet_info(self.xml_root)
+            print(f"   Found {len(dashboard_info)} dashboards/worksheets")
+            
             # Get SQL queries from XML
             datasource_xml = self.parser.find_datasource_xml(datasource.name)
             if datasource_xml:
@@ -138,6 +146,7 @@ class TableauMigrator:
             
             ds_info['field_count'] = len(ds_info['fields'])
             ds_info['sql_info'] = sql_info
+            ds_info['dashboard_info'] = dashboard_info
             data_sources.append(ds_info)
         
         return data_sources
@@ -154,6 +163,12 @@ class TableauMigrator:
         # Export CSV field mapping
         print("📊 Exporting field mapping CSV...")
         self.csv_exporter.export_field_mapping_csv('output', data_sources)
+        
+        # Export dashboard usage CSV
+        print("📋 Exporting dashboard usage CSV...")
+        for ds in data_sources:
+            if ds.get('dashboard_info'):
+                self.csv_exporter.export_dashboard_usage_csv('output', [ds], ds['dashboard_info'])
 
 
 def main():

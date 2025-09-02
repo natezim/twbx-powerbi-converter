@@ -48,7 +48,7 @@ class CSVExporter:
             safe_name = ''.join(c for c in safe_name if c.isalnum() or c in '_-')
             csv_file = os.path.join(output_dir, f"{safe_name}_field_mapping.csv")
             
-                            # Sort fields by table name first, then by column name
+            # Sort fields by table name first, then by column name
             # Put calculated fields at the end since they don't have table names
             sorted_fields = sorted(ds['fields'], key=lambda x: (
                 x.get('is_calculated', False),  # Calculated fields last
@@ -236,11 +236,11 @@ class CSVExporter:
                                 if '=' in first_condition:
                                     left_part, right_part = first_condition.split('=', 1)
                                     left_table = left_part.split('.')[0].strip()
-                                    right_table = right_part.split('.')[0].strip()
+                                    right_part = right_part.split('.')[0].strip()
                                     
                                     # Convert aliases to actual table names
                                     actual_left_table = self.get_actual_table_name(left_table, datasource_info)
-                                    actual_right_table = self.get_actual_table_name(right_table, datasource_info)
+                                    actual_right_table = self.get_actual_table_name(right_part, datasource_info)
                                     
                                     # Extract field names from the condition
                                     left_field = left_part.split('.')[1].strip() if '.' in left_part else ''
@@ -248,7 +248,7 @@ class CSVExporter:
                                     
                                     # Get original Tableau aliases (with spaces) from the table mapping
                                     left_original_alias = self.get_original_alias(left_table, datasource_info)
-                                    right_original_alias = self.get_original_alias(right_table, datasource_info)
+                                    right_original_alias = self.get_original_alias(right_part, datasource_info)
                                     
                                     # Format the relationship with AS for both tables
                                     # Add quotes around aliases with spaces
@@ -328,3 +328,189 @@ class CSVExporter:
             print(f"✅ Created setup guide: {txt_filename}")
         
         return True
+
+    def export_dashboard_usage_csv(self, output_dir, data_sources, dashboard_info):
+        """Export dashboard and worksheet usage information to CSV."""
+        os.makedirs(output_dir, exist_ok=True)
+        
+        for ds in data_sources:
+            if not dashboard_info:
+                continue
+            
+            # Create CSV filename
+            safe_name = ds['caption'].replace(' ', '_').replace('/', '_')
+            safe_name = ''.join(c for c in safe_name if c.isalnum() or c in '_-')
+            csv_file = os.path.join(output_dir, f"{safe_name}_dashboard_usage.csv")
+            
+            # Write CSV with dashboard and worksheet information
+            with open(csv_file, 'w', newline='', encoding='utf-8') as csvfile:
+                fieldnames = ['Item_Name', 'Item_Type', 'Chart_Type', 'Mark_Type', 'Size', 'Used_Fields', 'Filters', 'Filter_Function', 'Filter_Operation', 'Filter_Values', 'Filter_Description', 'Slicers', 'Rows_Layout', 'Columns_Layout', 'Cards_Layout', 'Aggregation', 'Power_BI_Recommendations']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                
+                # Write header
+                writer.writeheader()
+                
+                # Write dashboard and worksheet data
+                for item_name, item_info in dashboard_info.items():
+                    item_type = item_info.get('type', 'Unknown')
+                    
+                    if item_type == 'worksheet':
+                        chart_type = item_info.get('class', 'Unknown')
+                        mark_type = item_info.get('mark_type', 'Unknown')
+                        size = 'N/A'
+                        used_fields = '; '.join(item_info.get('used_fields', []))
+                        
+                        # Format filters with type and field info
+                        filters = []
+                        filter_functions = []
+                        filter_operations = []
+                        filter_values = []
+                        filter_descriptions = []
+                        
+                        for f in item_info.get('filters', []):
+                            filter_desc = f"{f['field']}({f['type']})"
+                            if f['name'] and f['name'] != f['field']:
+                                filter_desc = f"{f['name']}: {filter_desc}"
+                            filters.append(filter_desc)
+                            
+                            # Extract detailed filter information
+                            filter_functions.append(f.get('function', ''))
+                            filter_operations.append(f.get('operation', ''))
+                            
+                            # Format filter values
+                            values = f.get('values', [])
+                            if values:
+                                filter_values.append('; '.join(values))
+                            else:
+                                filter_values.append('')
+                            
+                            filter_descriptions.append(f.get('description', ''))
+                        
+                        filters_str = '; '.join(filters)
+                        filter_functions_str = '; '.join(filter_functions)
+                        filter_operations_str = '; '.join(filter_operations)
+                        filter_values_str = '; '.join(filter_values)
+                        filter_descriptions_str = '; '.join(filter_descriptions)
+                        
+                        # Format slicers
+                        slicers = '; '.join(item_info.get('slicers', []))
+                        
+                        # Format layout information
+                        rows_layout = '; '.join(item_info.get('rows_layout', []))
+                        columns_layout = '; '.join(item_info.get('columns_layout', []))
+                        
+                        # Format cards layout (UI structure)
+                        cards_layout = []
+                        for edge, cards in item_info.get('cards_layout', {}).items():
+                            cards_layout.append(f"{edge}: {', '.join(cards)}")
+                        cards_layout_str = '; '.join(cards_layout)
+                        
+                        # Aggregation setting
+                        aggregation = 'Yes' if item_info.get('aggregation_enabled', False) else 'No'
+                        
+                        # Power BI recommendations based on chart type and layout
+                        powerbi_recommendations = self.get_powerbi_chart_recommendation(chart_type, item_info)
+                        
+                    elif item_type == 'dashboard':
+                        chart_type = 'Dashboard'
+                        mark_type = 'N/A'
+                        width = item_info.get('width', 'Unknown')
+                        height = item_info.get('height', 'Unknown')
+                        size = f"{width}x{height}"
+                        used_fields = 'N/A'
+                        filters = '; '.join([f"{f['field']}({f['type']})" for f in item_info.get('filters', [])])
+                        filter_functions_str = 'N/A'
+                        filter_operations_str = 'N/A'
+                        filter_values_str = 'N/A'
+                        filter_descriptions_str = 'N/A'
+                        slicers = 'N/A'
+                        rows_layout = 'N/A'
+                        columns_layout = 'N/A'
+                        cards_layout_str = 'N/A'
+                        aggregation = 'N/A'
+                        powerbi_recommendations = 'Create new Power BI report page with same layout'
+                    
+                    else:
+                        chart_type = 'Unknown'
+                        mark_type = 'Unknown'
+                        size = 'N/A'
+                        used_fields = 'N/A'
+                        filters = 'N/A'
+                        filter_functions_str = 'N/A'
+                        filter_operations_str = 'N/A'
+                        filter_values_str = 'N/A'
+                        filter_descriptions_str = 'N/A'
+                        slicers = 'N/A'
+                        rows_layout = 'N/A'
+                        columns_layout = 'N/A'
+                        cards_layout_str = 'N/A'
+                        aggregation = 'N/A'
+                        powerbi_recommendations = 'Review manually'
+                    
+                    writer.writerow({
+                        'Item_Name': item_name,
+                        'Item_Type': item_type,
+                        'Chart_Type': chart_type,
+                        'Mark_Type': mark_type,
+                        'Size': size,
+                        'Used_Fields': used_fields,
+                        'Filters': filters_str if item_type == 'worksheet' else filters,
+                        'Filter_Function': filter_functions_str,
+                        'Filter_Operation': filter_operations_str,
+                        'Filter_Values': filter_values_str,
+                        'Filter_Description': filter_descriptions_str,
+                        'Slicers': slicers,
+                        'Rows_Layout': rows_layout,
+                        'Columns_Layout': columns_layout,
+                        'Cards_Layout': cards_layout_str,
+                        'Aggregation': aggregation,
+                        'Power_BI_Recommendations': powerbi_recommendations
+                    })
+            
+            print(f"✅ Created dashboard usage CSV: {csv_file}")
+
+    def get_powerbi_chart_recommendation(self, tableau_chart_type, item_info=None):
+        """Get Power BI chart recommendations based on Tableau chart type and layout."""
+        chart_mappings = {
+            'bar': 'Clustered Column Chart or Bar Chart',
+            'line': 'Line Chart',
+            'scatter': 'Scatter Chart',
+            'crosstab': 'Matrix Visual',
+            'map': 'Map Visual (with geographic field mapping)',
+            'pie': 'Pie Chart or Donut Chart',
+            'area': 'Area Chart',
+            'heatmap': 'Matrix Visual with conditional formatting',
+            'treemap': 'Treemap Visual',
+            'bubble': 'Scatter Chart with size field',
+            'histogram': 'Column Chart with binning',
+            'box': 'Box and Whisker Chart',
+            'gantt': 'Gantt Chart (custom visual)',
+            'funnel': 'Funnel Chart',
+            'bullet': 'Column Chart with target line'
+        }
+        
+        # Clean the chart type and get recommendation
+        clean_type = tableau_chart_type.lower().replace('_', '').replace('-', '')
+        for key, recommendation in chart_mappings.items():
+            if key in clean_type:
+                return recommendation
+        
+        # If we have additional layout information, provide more specific recommendations
+        if item_info and item_info.get('type') == 'worksheet':
+            # Check if it's a table-like structure
+            if item_info.get('class') == 'Table':
+                if item_info.get('rows_layout') and item_info.get('columns_layout'):
+                    return 'Matrix Visual with rows and columns layout'
+                elif item_info.get('rows_layout'):
+                    return 'Table Visual with row grouping'
+                else:
+                    return 'Table Visual'
+            
+            # Check mark type for additional context
+            mark_type = item_info.get('mark_type', '')
+            if mark_type == 'Automatic':
+                return 'Auto-chart (Power BI will suggest best visual)'
+            elif mark_type != 'Unknown':
+                return f'Custom mark type: {mark_type} - review for Power BI equivalent'
+        
+        return 'Review chart type manually for Power BI equivalent'

@@ -88,9 +88,6 @@ class FieldExtractor:
                                     'used_in_workbook': False
                                 }
                 
-                # Extract calculated fields from workbook XML
-                self.extract_calculated_fields_from_workbook(field_metadata)
-                
                 # Now check for field usage across the entire workbook
                 self.track_field_usage(field_metadata)
                 break
@@ -122,6 +119,262 @@ class FieldExtractor:
                                 if metadata_key in clean_field_name or clean_field_name in metadata_key:
                                     field_metadata[metadata_key]['used_in_workbook'] = True
                                     break
+
+    def extract_filter_details(self, filter_elem):
+        """Extract detailed filter information including function, operation, and values."""
+        filter_details = {}
+        
+        # Get the main groupfilter
+        main_groupfilter = filter_elem.find('.//groupfilter')
+        if main_groupfilter is not None:
+            # Extract filter function (union, except, etc.)
+            filter_details['function'] = main_groupfilter.get('function', '')
+            
+            # Extract operation details
+            filter_details['operation'] = main_groupfilter.get('user:op', '')
+            
+            # Extract behavior (exclusive, relevant, etc.)
+            filter_details['behavior'] = main_groupfilter.get('user:ui-domain', '')
+            
+            # Extract filter values/members
+            values = []
+            for member_filter in main_groupfilter.findall('.//groupfilter[@function="member"]'):
+                member_value = member_filter.get('member', '')
+                if member_value:
+                    # Clean up the member value
+                    clean_value = member_value.replace('&quot;', '"').replace('[', '').replace(']', '')
+                    # Extract just the field name part if it's a complex reference
+                    if '.' in clean_value:
+                        field_part = clean_value.split('.')[-1]
+                    else:
+                        field_part = clean_value
+                    values.append(field_part)
+            
+            filter_details['values'] = values
+            
+            # Create a human-readable description
+            if filter_details['function'] == 'union':
+                if values:
+                    filter_details['description'] = f"Show only: {', '.join(values)}"
+                else:
+                    filter_details['description'] = "Include specific values"
+            elif filter_details['function'] == 'except':
+                if values:
+                    filter_details['description'] = f"Exclude: {', '.join(values)}"
+                else:
+                    filter_details['description'] = "Exclude specific values"
+            elif filter_details['function'] == 'level-members':
+                filter_details['description'] = "Show all values in level"
+            else:
+                filter_details['description'] = f"{filter_details['function']} operation"
+        
+        return filter_details
+
+    def extract_dashboard_worksheet_info(self, xml_root):
+        """Extract dashboard and worksheet information with field usage and filters."""
+        if not self.xml_root:
+            return {}
+        
+        print(f"🔍 Extracting dashboard and worksheet information...")
+        
+        dashboard_info = {}
+        
+        # Extract worksheets
+        worksheets = self.xml_root.findall('.//worksheet')
+        print(f"   Found {len(worksheets)} worksheets")
+        
+        for worksheet in worksheets:
+            worksheet_name = worksheet.get('name', 'Unknown')
+            print(f"   Processing worksheet: {worksheet_name}")
+            
+            # Get worksheet type (chart type) - look for table, chart, map, etc.
+            worksheet_type = 'Unknown'
+            table_elem = worksheet.find('.//table')
+            chart_elem = worksheet.find('.//chart')
+            map_elem = worksheet.find('.//map')
+            
+            if table_elem is not None:
+                worksheet_type = 'Table'
+            elif chart_elem is not None:
+                worksheet_type = 'Chart'
+            elif map_elem is not None:
+                worksheet_type = 'Map'
+            
+            # Extract fields used in this worksheet
+            used_fields = []
+            field_elements = worksheet.findall('.//column')
+            for field_elem in field_elements:
+                field_name = field_elem.get('name', '')
+                if field_name:
+                    # For calculated fields, use the caption (display name) instead of internal ID
+                    if field_elem.find('calculation') is not None:
+                        # This is a calculated field - use caption if available
+                        caption = field_elem.get('caption', '')
+                        if caption:
+                            used_fields.append(caption)
+                        else:
+                            # Fallback to cleaned name if no caption
+                            clean_name = field_name.replace('[', '').replace(']', '')
+                            used_fields.append(clean_name)
+                    else:
+                        # Regular field - use cleaned name
+                        clean_name = field_name.replace('[', '').replace(']', '')
+                        used_fields.append(clean_name)
+            
+            # Extract filters applied to this worksheet
+            filters = []
+            filter_elements = worksheet.findall('.//filter')
+            for filter_elem in filter_elements:
+                filter_name = filter_elem.get('name', '')
+                filter_type = filter_elem.get('class', 'Unknown')
+                filter_field = filter_elem.get('column', '')
+                
+                if filter_field:
+                    # Clean up the filter field name
+                    clean_filter_field = filter_field.replace('[', '').replace(']', '')
+                    # Extract just the field name part (after the last dot)
+                    if '.' in clean_filter_field:
+                        field_part = clean_filter_field.split('.')[-1]
+                    else:
+                        field_part = clean_filter_field
+                    
+                    # Extract detailed filter information
+                    filter_details = self.extract_filter_details(filter_elem)
+                    
+                    filters.append({
+                        'name': filter_name or field_part,
+                        'type': filter_type,
+                        'field': field_part,
+                        'full_column': clean_filter_field,
+                        'function': filter_details.get('function', ''),
+                        'operation': filter_details.get('operation', ''),
+                        'values': filter_details.get('values', []),
+                        'behavior': filter_details.get('behavior', ''),
+                        'description': filter_details.get('description', '')
+                    })
+            
+            # Extract slicers (what users can filter on)
+            slicers = []
+            slice_elements = worksheet.findall('.//slices/column')
+            for slice_elem in slice_elements:
+                slice_text = slice_elem.text
+                if slice_text:
+                    clean_slice = slice_text.replace('[', '').replace(']', '')
+                    # Extract just the field name part
+                    if '.' in clean_slice:
+                        field_part = clean_slice.split('.')[-1]
+                    else:
+                        field_part = clean_slice
+                    slicers.append(field_part)
+            
+            # Extract layout information (rows and columns)
+            rows_layout = []
+            cols_layout = []
+            
+            rows_elem = worksheet.find('.//rows')
+            if rows_elem is not None and rows_elem.text:
+                rows_text = rows_elem.text
+                # Parse the complex row layout (e.g., "field1 / field2 / field3")
+                if '/' in rows_text:
+                    row_fields = [f.strip().replace('[', '').replace(']', '') for f in rows_text.split('/')]
+                    rows_layout = [f for f in row_fields if f and not f.startswith('(') and not f.endswith(')')]
+                else:
+                    clean_row = rows_text.replace('[', '').replace(']', '')
+                    if clean_row:
+                        rows_layout.append(clean_row)
+            
+            cols_elem = worksheet.find('.//cols')
+            if cols_elem is not None and cols_elem.text:
+                cols_text = cols_elem.text
+                if cols_text:
+                    clean_col = cols_text.replace('[', '').replace(']', '')
+                    if clean_col:
+                        cols_layout.append(clean_col)
+            
+            # Extract card layout information (UI structure)
+            cards_info = {}
+            cards_elem = worksheet.find('.//cards')
+            if cards_elem is not None:
+                for edge in cards_elem.findall('.//edge'):
+                    edge_name = edge.get('name', '')
+                    edge_cards = []
+                    for card in edge.findall('.//card'):
+                        card_type = card.get('type', '')
+                        edge_cards.append(card_type)
+                    if edge_cards:
+                        cards_info[edge_name] = edge_cards
+            
+            # Extract mark type (what kind of marks are used)
+            mark_type = 'Unknown'
+            mark_elem = worksheet.find('.//mark')
+            if mark_elem is not None:
+                mark_type = mark_elem.get('class', 'Unknown')
+            
+            # Extract aggregation settings
+            aggregation_enabled = False
+            agg_elem = worksheet.find('.//aggregation')
+            if agg_elem is not None:
+                aggregation_enabled = agg_elem.get('value', 'false') == 'true'
+            
+            dashboard_info[worksheet_name] = {
+                'type': 'worksheet',
+                'class': worksheet_type,
+                'mark_type': mark_type,
+                'aggregation_enabled': aggregation_enabled,
+                'used_fields': used_fields,
+                'filters': filters,
+                'slicers': slicers,
+                'rows_layout': rows_layout,
+                'columns_layout': cols_layout,
+                'cards_layout': cards_info
+            }
+        
+        # Extract dashboards
+        dashboards = self.xml_root.findall('.//dashboard')
+        print(f"   Found {len(dashboards)} dashboards")
+        
+        for dashboard in dashboards:
+            dashboard_name = dashboard.get('name', 'Unknown')
+            print(f"   Processing dashboard: {dashboard_name}")
+            
+            # Get dashboard size
+            size_elem = dashboard.find('.//size')
+            width = size_elem.get('width', 'Unknown') if size_elem is not None else 'Unknown'
+            height = size_elem.get('height', 'Unknown') if size_elem is not None else 'Unknown'
+            
+            # Extract worksheets included in this dashboard
+            included_worksheets = []
+            worksheet_elements = dashboard.findall('.//worksheet')
+            for ws_elem in worksheet_elements:
+                ws_name = ws_elem.get('name', '')
+                if ws_name:
+                    included_worksheets.append(ws_name)
+            
+            # Extract dashboard-level filters
+            dashboard_filters = []
+            filter_elements = dashboard.findall('.//filter')
+            for filter_elem in filter_elements:
+                filter_name = filter_elem.get('name', '')
+                filter_type = filter_elem.get('class', 'Unknown')
+                filter_field = filter_elem.get('field', '')
+                
+                if filter_name:
+                    dashboard_filters.append({
+                        'name': filter_name,
+                        'type': filter_type,
+                        'field': filter_field.replace('[', '').replace(']', '') if filter_field else ''
+                    })
+            
+            dashboard_info[dashboard_name] = {
+                'type': 'dashboard',
+                'width': width,
+                'height': height,
+                'included_worksheets': included_worksheets,
+                'filters': dashboard_filters
+            }
+        
+        print(f"   Total items found: {len(dashboard_info)}")
+        return dashboard_info
 
     def extract_calculated_fields_from_workbook(self, field_metadata):
         """Extract calculated field information from workbook XML."""
