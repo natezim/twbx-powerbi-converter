@@ -254,11 +254,30 @@ class CSVExporter:
                     f.write(f"------------------\n")
                     for i, conn in enumerate(datasource_info['connections'], 1):
                         f.write(f"Connection {i}:\n")
+                        
+                        # Standard connection properties
                         f.write(f"  Server: {conn.get('server', 'N/A')}\n")
                         f.write(f"  Database: {conn.get('dbname', 'N/A')}\n")
                         f.write(f"  Username: {conn.get('username', 'N/A')}\n")
                         f.write(f"  Type: {conn.get('dbclass', 'N/A')}\n")
-                        f.write(f"  Port: {conn.get('port', 'N/A')}\n\n")
+                        f.write(f"  Port: {conn.get('port', 'N/A')}\n")
+                        
+                        # BigQuery-specific properties
+                        if conn.get('dbclass') == 'bigquery':
+                            if conn.get('project'):
+                                f.write(f"  Project: {conn.get('project')}\n")
+                            if conn.get('dataset'):
+                                f.write(f"  Dataset: {conn.get('dataset')}\n")
+                            if conn.get('location'):
+                                f.write(f"  Location: {conn.get('location')}\n")
+                            if conn.get('region'):
+                                f.write(f"  Region: {conn.get('region')}\n")
+                        
+                        # Other cloud database properties
+                        if conn.get('region') and conn.get('dbclass') != 'bigquery':
+                            f.write(f"  Region: {conn.get('region')}\n")
+                        
+                        f.write(f"\n")
                 
                 # Tables to import
                 if datasource_info.get('sql_info', {}).get('all_tables'):

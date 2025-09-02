@@ -114,6 +114,22 @@ class TableauMigrator:
                     'schema': getattr(connection, 'schema', ''),
                     'filename': getattr(connection, 'filename', '')
                 }
+                
+                # Enhanced BigQuery and cloud database support
+                # BigQuery might use different property names
+                if hasattr(connection, 'project') and getattr(connection, 'project'):
+                    conn_info['project'] = getattr(connection, 'project', '')
+                if hasattr(connection, 'dataset') and getattr(connection, 'dataset'):
+                    conn_info['dataset'] = getattr(connection, 'dataset', '')
+                if hasattr(connection, 'location') and getattr(connection, 'location'):
+                    conn_info['location'] = getattr(connection, 'location', '')
+                if hasattr(connection, 'region') and getattr(connection, 'region'):
+                    conn_info['region'] = getattr(connection, 'region', '')
+                
+                # For BigQuery, use project as the primary identifier if dbname is empty
+                if conn_info['dbclass'] == 'bigquery' and not conn_info['dbname'] and conn_info.get('project'):
+                    conn_info['dbname'] = conn_info['project']
+                
                 ds_info['connections'].append(conn_info)
             
             # Get rich field metadata from XML
