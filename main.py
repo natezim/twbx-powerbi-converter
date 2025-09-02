@@ -21,7 +21,7 @@ class TableauMigrator:
         self.sql_generator = None
         self.csv_exporter = CSVExporter()
     
-    def process_twbx_file(self, twbx_path):
+    def process_twbx_file(self, twbx_path, skip_hyper_extraction=False):
         """Process a single TWBX file through the complete pipeline."""
         print(f"🔄 Processing: {twbx_path}")
         print("-" * 50)
@@ -37,7 +37,7 @@ class TableauMigrator:
             
             # 2. Extract data sources
             print("🔍 Analyzing data sources...")
-            data_sources = self.extract_data_sources()
+            data_sources = self.extract_data_sources(skip_hyper_extraction)
             
             if not data_sources:
                 print("❌ No data sources found")
@@ -64,7 +64,7 @@ class TableauMigrator:
             traceback.print_exc()
             return None
     
-    def extract_data_sources(self):
+    def extract_data_sources(self, skip_hyper_extraction=False):
         """Extract data sources using the modular approach."""
         if not self.parser:
             return []
@@ -123,15 +123,19 @@ class TableauMigrator:
             # Extract calculated fields from workbook XML
             self.field_extractor.extract_calculated_fields_from_workbook(xml_metadata)
             
-            # Extract data from Hyper files (if any exist)
-            print("🔍 Looking for Hyper data files...")
-            hyper_data = self.field_extractor.extract_data_from_hyper_files(self.parser.twbx_path)
-            
-            # Check if Hyper API dependency is missing
-            if hyper_data.get("__missing_dependency__"):
-                print(f"   ⚠️ Hyper data extraction skipped: {hyper_data['__missing_dependency__']} not available")
-                print("   Install with: pip install tableauhyperapi")
-                hyper_data = {}  # Clear the marker
+            # Extract data from Hyper files (if any exist and not skipped)
+            if skip_hyper_extraction:
+                print("🔍 Skipping Hyper data extraction (analysis mode)")
+                hyper_data = {}
+            else:
+                print("🔍 Looking for Hyper data files...")
+                hyper_data = self.field_extractor.extract_data_from_hyper_files(self.parser.twbx_path)
+                
+                # Check if Hyper API dependency is missing
+                if hyper_data.get("__missing_dependency__"):
+                    print(f"   ⚠️ Hyper data extraction skipped: {hyper_data['__missing_dependency__']} not available")
+                    print("   Install with: pip install tableauhyperapi")
+                    hyper_data = {}  # Clear the marker
             
             # Get dashboard and worksheet information
             dashboard_info = self.field_extractor.extract_dashboard_worksheet_info(self.xml_root)

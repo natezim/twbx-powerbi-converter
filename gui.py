@@ -164,8 +164,8 @@ class ImprovedTableauConverterGUI:
             # Initialize migrator
             self.migrator = TableauMigrator()
             
-            # Process the file
-            self.data_sources = self.migrator.process_twbx_file(self.selected_file)
+            # Process the file (skip Hyper extraction for analysis mode)
+            self.data_sources = self.migrator.process_twbx_file(self.selected_file, skip_hyper_extraction=True)
             
             if self.data_sources:
                 # Export regular results (CSV, setup guides) but skip Hyper data
@@ -199,9 +199,8 @@ class ImprovedTableauConverterGUI:
         
         # Enable buttons
         self.analyze_btn.config(state="normal")
-        # Enable extract button if Hyper data is available
-        if any(ds.get('hyper_data') for ds in self.data_sources):
-            self.extract_btn.config(state="normal")
+        # Always enable extract button after analysis (it will check for Hyper data when clicked)
+        self.extract_btn.config(state="normal")
         
         # Update status
         self.status_var.set(f"Analysis complete: {len(self.data_sources)} datasource(s) found")
@@ -350,6 +349,14 @@ class ImprovedTableauConverterGUI:
     def _extract_data_thread(self):
         """Run data extraction in background thread."""
         try:
+            # First, we need to extract Hyper data from the TWBX file
+            # Process the file again but this time WITH Hyper extraction
+            self.data_sources = self.migrator.process_twbx_file(self.selected_file, skip_hyper_extraction=False)
+            
+            if not self.data_sources:
+                self.root.after(0, self._extraction_failed, "Failed to process TWBX file for Hyper data extraction")
+                return
+            
             # Find the selected datasource
             selected_name = self.datasource_var.get()
             selected_ds = None
@@ -367,7 +374,7 @@ class ImprovedTableauConverterGUI:
                         f"Hyper data extraction requires {missing_dep}. Install with: pip install {missing_dep}")
                     return
                 
-                # Data is already extracted during analysis, but let's save it to files
+                # Export hyper data to Excel
                 try:
                     # Create workbook-specific folder for hyper data
                     workbook_name = selected_ds.get('workbook_name', 'Unknown')
