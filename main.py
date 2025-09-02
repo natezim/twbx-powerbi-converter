@@ -75,6 +75,10 @@ class TableauMigrator:
         if not workbook or not xml_root:
             return []
         
+        # Get actual TWBX filename for file naming
+        twbx_filename = os.path.basename(self.parser.twbx_path)
+        workbook_name = os.path.splitext(twbx_filename)[0]  # Remove .twbx extension
+        
         # Initialize extractors
         self.field_extractor = FieldExtractor(xml_root, workbook)
         self.xml_root = xml_root
@@ -82,15 +86,22 @@ class TableauMigrator:
         
         data_sources = []
         
-        # Iterate through data sources using official API
+        # Add workbook name to each data source for proper file naming
         for datasource in workbook.datasources:
             ds_info = {
                 'name': datasource.name,
                 'caption': datasource.caption,
+                'workbook_name': workbook_name,  # Add workbook name for file naming
+                'twbx_path': self.parser.twbx_path,  # Add TWBX file path for copying
                 'connections': [],
                 'fields': [],
                 'field_count': 0
             }
+            
+            # Special handling for Parameters datasource - treat as calculated fields
+            if datasource.name == 'Parameters':
+                print(f"   Found Parameters datasource - will merge with main datasource")
+                continue  # Skip creating separate datasource entry for Parameters
             
             # Get connections using official API
             for connection in datasource.connections:
@@ -139,6 +150,7 @@ class TableauMigrator:
                     'table_reference': metadata.get('table_reference', field_name),
                     'used_in_workbook': metadata.get('used_in_workbook', False),
                     'is_calculated': metadata.get('is_calculated', False),
+                    'is_parameter': metadata.get('is_parameter', False),  # Add parameter flag
                     'calculation_formula': metadata.get('calculation_formula', ''),
                     'calculation_class': metadata.get('calculation_class', '')
                 }
@@ -166,9 +178,9 @@ class TableauMigrator:
         
         # Export dashboard usage CSV
         print("📋 Exporting dashboard usage CSV...")
-        for ds in data_sources:
-            if ds.get('dashboard_info'):
-                self.csv_exporter.export_dashboard_usage_csv('output', [ds], ds['dashboard_info'])
+        # Only export dashboard usage for the first datasource to avoid duplicates
+        if data_sources and data_sources[0].get('dashboard_info'):
+            self.csv_exporter.export_dashboard_usage_csv('output', data_sources, data_sources[0]['dashboard_info'])
 
 
 def main():

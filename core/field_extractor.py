@@ -14,6 +14,18 @@ class FieldExtractor:
         self.xml_root = xml_root
         self.workbook = workbook
     
+    def clean_field_name(self, field_name):
+        """Clean field name by removing numbers at the beginning and extra spaces."""
+        import re
+        
+        # Remove numbers and dots at the beginning (e.g., "1. Period" -> "Period")
+        cleaned = re.sub(r'^\d+\.?\s*', '', field_name)
+        
+        # Remove extra spaces
+        cleaned = cleaned.strip()
+        
+        return cleaned
+    
     def extract_field_metadata(self, datasource_name):
         """Extract rich field metadata from XML including usage tracking."""
         if not self.xml_root:
@@ -57,9 +69,17 @@ class FieldExtractor:
                             local_type = record.find('local-type')
                             data_type = local_type.text if local_type is not None else 'Unknown'
                             
-                            # Get aggregation/role
+                            # Get aggregation and role separately
                             aggregation = record.find('aggregation')
-                            role = aggregation.text if aggregation is not None else 'None'
+                            aggregation_text = aggregation.text if aggregation is not None else 'None'
+                            
+                            # Determine role based on aggregation type
+                            if aggregation_text in ['Sum', 'Count', 'Average', 'Min', 'Max']:
+                                role = 'measure'
+                            elif aggregation_text == 'None':
+                                role = 'dimension'
+                            else:
+                                role = 'dimension'  # Default to dimension for other cases
                             
                             # Get parent table
                             parent_name = record.find('parent-name')
@@ -74,6 +94,7 @@ class FieldExtractor:
                                 field_metadata[field_name].update({
                                     'data_type': data_type,
                                     'role': role,
+                                    'aggregation': aggregation_text,
                                     'parent_table': parent_table,
                                     'remote_name': remote_field
                                 })
@@ -81,6 +102,7 @@ class FieldExtractor:
                                 field_metadata[field_name] = {
                                     'data_type': data_type,
                                     'role': role,
+                                    'aggregation': aggregation_text,
                                     'parent_table': parent_table,
                                     'remote_name': remote_field,
                                     'table_reference': parent_table,  # Just the table name
@@ -377,94 +399,255 @@ class FieldExtractor:
         return dashboard_info
 
     def extract_calculated_fields_from_workbook(self, field_metadata):
-        """Extract calculated field information from workbook XML."""
+        """Extract calculated field information from workbook XML using official Tableau API."""
         if not self.xml_root:
             return
         
-        print(f"🔍 Looking for calculated fields in workbook XML...")
+        print(f"🔍 Looking for calculated fields and parameters in workbook XML...")
         
-        # Look for calculated fields in the workbook XML
-        calculated_columns = self.xml_root.findall('.//column[calculation]')
-        print(f"   Found {len(calculated_columns)} columns with calculations in workbook XML")
+        # Use the official Tableau API to properly distinguish between calculated fields and parameters
+        if not self.workbook:
+            print("   Warning: No workbook object available, falling back to XML parsing")
+            return
         
-        for column in calculated_columns:
-            # Get the actual field name from the XML attributes (like field.py does)
-            column_name = column.get('name', '')
-            if not column_name:
-                continue
+        # Process each datasource in the workbook
+        for datasource in self.workbook.datasources:
+            print(f"   Processing datasource: {datasource.name}")
             
-            # Clean the name (remove brackets) - this is the actual field name
-            clean_name = column_name.replace('[', '').replace(']', '')
-            
-            # Get the caption (display name) if available
-            caption = column.get('caption', clean_name)
-            
-            print(f"   Processing calculated field: {clean_name}")
-            print(f"     Caption: {caption}")
-            
-            # Check if this column has a calculation
-            calculation_elem = column.find('calculation')
-            if calculation_elem is not None:
-                formula = calculation_elem.get('formula', '')
-                calc_class = calculation_elem.get('class', 'tableau')
-                
-                print(f"     Formula: {formula[:50]}{'...' if len(formula) > 50 else ''}")
-                print(f"     Class: {calc_class}")
-                
-                # Check if this field already exists in metadata and update it
-                if clean_name in field_metadata:
-                    print(f"     Updating existing field: {clean_name}")
-                    field_metadata[clean_name].update({
-                        'is_calculated': True,
-                        'calculation_formula': formula,
-                        'calculation_class': calc_class,
-                        'table_reference': None,  # Calculated fields don't have table references
-                        'remote_name': None,  # Calculated fields don't have remote names
-                        'used_in_workbook': True  # Mark calculated fields as used since they exist in the workbook
-                    })
-                else:
-                    print(f"     Field {clean_name} not found in metadata, checking for partial matches...")
-                    # Try to find partial matches in the metadata
-                    found_match = False
-                    for metadata_key in field_metadata.keys():
-                        if clean_name in metadata_key or metadata_key in clean_name:
-                            print(f"     Found partial match: {metadata_key} -> updating as calculated field")
-                            field_metadata[metadata_key].update({
+            # Get all fields from this datasource using the official API
+            if hasattr(datasource, 'fields'):
+                for field_name, field_obj in datasource.fields.items():
+                    # Clean the field name (remove brackets)
+                    clean_name = field_name.replace('[', '').replace(']', '')
+                    
+                    # Get the caption (display name) - this is what users see in Tableau
+                    caption = getattr(field_obj, 'caption', clean_name)
+                    if not caption:
+                        caption = clean_name
+                    
+                    # Clean the caption to remove numbers at the beginning
+                    clean_caption = self.clean_field_name(caption)
+                    
+                    print(f"     Processing field: {clean_name} -> {clean_caption}")
+                    print(f"       Caption: {caption}")
+                    
+                    # Check if this is a calculated field using the official API
+                    if hasattr(field_obj, 'calculation') and field_obj.calculation:
+                        print(f"       Type: Calculated Field")
+                        print(f"       Formula: {field_obj.calculation[:50]}{'...' if len(field_obj.calculation) > 50 else ''}")
+                        
+                        # Create or update calculated field entry
+                        if clean_caption in field_metadata:
+                            field_metadata[clean_caption].update({
                                 'is_calculated': True,
-                                'calculation_formula': formula,
-                                'calculation_class': calc_class,
-                                'table_reference': None,
-                                'remote_name': None,
+                                'is_parameter': False,
+                                'calculation_formula': field_obj.calculation,
+                                'calculation_class': 'tableau',
+                                'datatype': getattr(field_obj, 'datatype', 'Unknown'),
+                                'role': getattr(field_obj, 'role', 'Unknown'),
+                                'type': getattr(field_obj, 'type', 'Unknown'),
                                 'used_in_workbook': True
                             })
-                            found_match = True
-                            break
+                        else:
+                            field_metadata[clean_caption] = {
+                                'name': clean_caption,
+                                'caption': caption,
+                                'datatype': getattr(field_obj, 'datatype', 'Unknown'),
+                                'role': getattr(field_obj, 'role', 'Unknown'),
+                                'type': getattr(field_obj, 'type', 'Unknown'),
+                                'is_calculated': True,
+                                'is_parameter': False,
+                                'field_type': 'Calculated',
+                                'calculation_formula': field_obj.calculation,
+                                'calculation_class': 'tableau',
+                                'table_reference': None,
+                                'remote_name': None,
+                                'used_in_workbook': True,
+                                'data_type': getattr(field_obj, 'datatype', 'Unknown'),
+                                'parent_table': 'Workbook',
+                                'table_name': 'Workbook'
+                            }
                     
-                    if not found_match:
-                        print(f"     Creating new calculated field with caption: {caption}")
-                        # Create new calculated field entry using the caption (display name) as the key
-                        field_metadata[caption] = {
-                            'name': caption,  # Use caption as the field name (what users see in Tableau)
-                            'caption': caption,  # This is the display name
-                            'datatype': column.get('datatype', 'Unknown'),
-                            'role': column.get('role', 'Unknown'),
-                            'type': column.get('type', 'Unknown'),
-                            'is_calculated': True,
-                            'calculation_formula': formula,
-                            'calculation_class': calc_class,
-                            'table_reference': None,  # Calculated fields don't have table references
-                            'remote_name': None,  # Calculated fields don't have remote names
-                            'used_in_workbook': True,  # Mark calculated fields as used since they exist in the workbook
-                            'data_type': column.get('datatype', 'Unknown'),
-                            'parent_table': 'Workbook',  # Calculated fields are created in the workbook
-                            'table_name': 'Workbook'  # Set table name to Workbook for calculated fields
-                        }
+                    # Check if this is a parameter field
+                    # Parameters in Tableau have specific attributes in the XML
+                    elif hasattr(field_obj, 'xml') and field_obj.xml is not None:
+                        # Check if the XML element has param-domain-type attribute (indicates parameter)
+                        if field_obj.xml.get('param-domain-type') is not None:
+                            print(f"       Type: Parameter")
+                            
+                            # Get formula if available
+                            formula = ''
+                            if hasattr(field_obj, 'calculation') and field_obj.calculation:
+                                formula = field_obj.calculation
+                                print(f"       Formula: {formula[:50]}{'...' if len(formula) > 50 else ''}")
+                            
+                            # Create or update parameter field entry
+                            if clean_caption in field_metadata:
+                                field_metadata[clean_caption].update({
+                                    'is_calculated': False,
+                                    'is_parameter': True,
+                                    'calculation_formula': formula,
+                                    'calculation_class': 'tableau',
+                                    'datatype': getattr(field_obj, 'datatype', 'Unknown'),
+                                    'role': getattr(field_obj, 'role', 'Unknown'),
+                                    'type': getattr(field_obj, 'type', 'Unknown'),
+                                    'used_in_workbook': True
+                                })
+                            else:
+                                field_metadata[clean_caption] = {
+                                    'name': clean_caption,
+                                    'caption': caption,
+                                    'datatype': getattr(field_obj, 'datatype', 'Unknown'),
+                                    'role': getattr(field_obj, 'role', 'Unknown'),
+                                    'type': getattr(field_obj, 'type', 'Unknown'),
+                                    'is_calculated': False,
+                                    'is_parameter': True,
+                                    'field_type': 'Parameter',
+                                    'calculation_formula': formula,
+                                    'calculation_class': 'tableau',
+                                    'table_reference': None,
+                                    'remote_name': None,
+                                    'used_in_workbook': True,
+                                    'data_type': getattr(field_obj, 'datatype', 'Unknown'),
+                                    'parent_table': 'Workbook',
+                                    'table_name': 'Workbook'
+                                }
+                        else:
+                            print(f"       Type: Regular Field")
+                    
+                    # FALLBACK: If the official API didn't detect parameters, check XML directly
+                    # This is needed because some Tableau versions don't expose param-domain-type properly
+                    if not field_metadata.get(clean_caption, {}).get('is_parameter', False):
+                        # Check if this field name matches a parameter pattern in the XML
+                        if self.xml_root:
+                            # Look for columns with param-domain-type attribute
+                            # Use a simpler approach to avoid XPath syntax issues with brackets
+                            param_elements = []
+                            for col in self.xml_root.findall('.//column[@param-domain-type]'):
+                                if col.get('name') == field_name:
+                                    param_elements.append(col)
+                                    break
+                            
+                            if param_elements:
+                                print(f"       Type: Parameter (detected via XML fallback)")
+                                
+                                # Get the parameter element
+                                param_elem = param_elements[0]
+                                param_type = param_elem.get('param-domain-type', 'Unknown')
+                                param_value = param_elem.get('value', '')
+                                
+                                # Create or update parameter field entry
+                                if clean_caption in field_metadata:
+                                    field_metadata[clean_caption].update({
+                                        'is_calculated': False,
+                                        'is_parameter': True,
+                                        'calculation_formula': param_value,
+                                        'calculation_class': 'tableau',
+                                        'datatype': getattr(field_obj, 'datatype', 'Unknown'),
+                                        'role': getattr(field_obj, 'role', 'Unknown'),
+                                        'type': getattr(field_obj, 'type', 'Unknown'),
+                                        'used_in_workbook': True
+                                    })
+                                else:
+                                    field_metadata[clean_caption] = {
+                                        'name': clean_caption,
+                                        'caption': caption,
+                                        'datatype': getattr(field_obj, 'datatype', 'Unknown'),
+                                        'role': getattr(field_obj, 'role', 'Unknown'),
+                                        'type': getattr(field_obj, 'type', 'Unknown'),
+                                        'is_calculated': False,
+                                        'is_parameter': True,
+                                        'field_type': 'Parameter',
+                                        'calculation_formula': param_value,
+                                        'calculation_class': 'tableau',
+                                        'table_reference': None,
+                                        'remote_name': None,
+                                        'used_in_workbook': True,
+                                        'data_type': getattr(field_obj, 'datatype', 'Unknown'),
+                                        'parent_table': 'Workbook',
+                                        'table_name': 'Workbook'
+                                    }
         
-        # Count calculated fields
+        # Count calculated fields and parameters
         calc_count = sum(1 for field in field_metadata.values() if field.get('is_calculated', False))
+        param_count = sum(1 for field in field_metadata.values() if field.get('is_parameter', False))
         print(f"   Total calculated fields in metadata: {calc_count}")
+        print(f"   Total parameters in metadata: {param_count}")
         
         # Debug: Show some field names in metadata
         print(f"   Sample fields in metadata: {list(field_metadata.keys())[:5]}")
         if calc_count > 0:
             print(f"   Calculated field names: {[k for k, v in field_metadata.items() if v.get('is_calculated', False)]}")
+        if param_count > 0:
+            print(f"   Parameter names: {[k for k, v in field_metadata.items() if v.get('is_parameter', False)]}")
+        
+        # Now resolve any calculation references to use friendly names
+        self.resolve_calculation_references(field_metadata)
+
+    def resolve_calculation_references(self, field_metadata):
+        """Replace internal calculation IDs with friendly field names in formulas."""
+        import re
+        
+        print("🔧 Resolving calculation references...")
+        
+        # FIRST PASS: Build a complete mapping from calculation IDs to friendly names
+        calc_id_to_name = {}
+        
+        if self.xml_root:
+            # Find all columns with calculations and build the mapping
+            calculated_columns = self.xml_root.findall('.//column[calculation]')
+            print(f"   Found {len(calculated_columns)} calculated columns in XML")
+            
+            for column in calculated_columns:
+                column_name = column.get('name', '').replace('[', '').replace(']', '')
+                caption = column.get('caption', column_name)
+                
+                # Map the calculation ID to its friendly name
+                calc_id_to_name[column_name] = caption
+                print(f"   Mapped calculation ID: {column_name} -> {caption}")
+        
+        # Also check our field metadata for any calculated fields we might have missed
+        for field_name, field_info in field_metadata.items():
+            if field_info.get('is_calculated', False):
+                # If this field has a calculation ID pattern, map it to its friendly name
+                if 'Calculation_' in field_name:
+                    calc_id_to_name[field_name] = field_info.get('name', field_name)
+                    print(f"   Mapped from metadata: {field_name} -> {field_info.get('name', field_name)}")
+        
+        print(f"   Total calculation mappings: {len(calc_id_to_name)}")
+        
+        # SECOND PASS: Replace calculation references in all formulas
+        replaced_count = 0
+        for field_name, field_info in field_metadata.items():
+            if field_info.get('is_calculated', False):
+                formula = field_info.get('calculation_formula', '')
+                original_formula = formula
+                
+                # Replace all known calculation IDs with friendly names
+                for calc_id, friendly_name in calc_id_to_name.items():
+                    if f'[{calc_id}]' in formula:
+                        # Clean the friendly name to remove numbers at the beginning
+                        clean_friendly_name = self.clean_field_name(friendly_name)
+                        formula = formula.replace(f'[{calc_id}]', f'[{clean_friendly_name}]')
+                        print(f"   In '{field_name}': Replaced [{calc_id}] with [{clean_friendly_name}]")
+                        replaced_count += 1
+                
+                # Also handle any remaining Calculation_XXXXXXXX patterns
+                calc_pattern = re.compile(r'\[Calculation_(\d+)\]')
+                matches = calc_pattern.findall(formula)
+                
+                for calc_num in matches:
+                    calc_ref = f'Calculation_{calc_num}'
+                    # Try to find a friendly name for this calculation ID
+                    if calc_ref in calc_id_to_name:
+                        # Clean the friendly name to remove numbers at the beginning
+                        clean_friendly_name = self.clean_field_name(calc_id_to_name[calc_ref])
+                        formula = formula.replace(f'[{calc_ref}]', f'[{clean_friendly_name}]')
+                        print(f"   In '{field_name}': Replaced [{calc_ref}] with [{clean_friendly_name}]")
+                        replaced_count += 1
+                
+                # Update the formula if it changed
+                if formula != original_formula:
+                    field_info['calculation_formula'] = formula
+        
+        print(f"   Total calculation references resolved: {replaced_count}")

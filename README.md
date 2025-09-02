@@ -10,6 +10,9 @@ A Python tool that extracts metadata from Tableau workbooks (.twbx) and generate
 - **Relationship Mapping**: Extracts and formats table relationships with proper JOIN syntax
 - **Field Mapping**: CSV export with original vs Tableau field names
 - **Calculated Field Filtering**: Automatically excludes calculated fields (database fields only)
+- **User-Friendly GUI**: Intuitive interface with drag & drop support
+- **Real-Time Progress**: Monitor conversion progress with detailed status updates
+- **Comprehensive Results**: View detailed results and open output folder directly
 
 ## Supported Database Types
 
@@ -36,15 +39,30 @@ pip install -r requirements.txt
 
 ## Usage
 
+### Option 1: GUI Mode (Recommended)
+1. Run the launcher:
+```bash
+python run.py
+```
+2. Choose option 1 for GUI mode
+3. Use the intuitive interface to:
+   - Drag & drop or browse for TWBX files
+   - Monitor conversion progress
+   - View results in real-time
+   - Open output folder directly
+
+### Option 2: Command Line Mode
 1. Place your Tableau workbook (.twbx) files in the project directory
 2. Run the converter:
 ```bash
 python main.py
 ```
 
-3. Check the `output/` folder for generated files:
+### Output Files
+Check the `output/` folder for generated files:
    - `*_setup_guide.txt` - Power BI setup instructions
    - `*_field_mapping.csv` - Field mapping data
+   - `*_dashboard_usage.csv` - Dashboard and worksheet details with filter information
 
 ## Output Format
 

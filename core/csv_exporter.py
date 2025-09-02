@@ -37,114 +37,167 @@ class CSVExporter:
     
     def export_field_mapping_csv(self, output_dir, data_sources):
         """Export field mapping to CSV for Power BI migration."""
-        os.makedirs(output_dir, exist_ok=True)
+        # Create workbook-specific folder
+        if data_sources:
+            workbook_name = data_sources[0].get('workbook_name', 'Unknown')
+            safe_workbook = workbook_name.replace(' ', '_').replace('/', '_')
+            safe_workbook = ''.join(c for c in safe_workbook if c.isalnum() or c in '_-')
+            workbook_folder = os.path.join(output_dir, safe_workbook)
+            os.makedirs(workbook_folder, exist_ok=True)
+            
+            # Copy the TWBX file into the workbook folder for a complete migration package
+            try:
+                import shutil
+                twbx_path = data_sources[0].get('twbx_path', '')
+                if twbx_path and os.path.exists(twbx_path):
+                    twbx_filename = os.path.basename(twbx_path)
+                    twbx_dest = os.path.join(workbook_folder, twbx_filename)
+                    shutil.copy2(twbx_path, twbx_dest)
+                    print(f"✅ Copied TWBX file to: {twbx_dest}")
+            except Exception as e:
+                print(f"⚠️  Warning: Could not copy TWBX file: {e}")
+        else:
+            workbook_folder = output_dir
         
-        for ds in data_sources:
-            if not ds['fields']:
-                continue
-            
-            # Create CSV filename
-            safe_name = ds['caption'].replace(' ', '_').replace('/', '_')
-            safe_name = ''.join(c for c in safe_name if c.isalnum() or c in '_-')
-            csv_file = os.path.join(output_dir, f"{safe_name}_field_mapping.csv")
-            
-            # Sort fields by table name first, then by column name
-            # Put calculated fields at the end since they don't have table names
-            sorted_fields = sorted(ds['fields'], key=lambda x: (
-                x.get('is_calculated', False),  # Calculated fields last
-                x.get('table_name', ''), 
-                x.get('remote_name', '')
-            ))
-            
-            # Debug: Show calculated fields
-            calc_fields = [f for f in ds['fields'] if f.get('is_calculated', False)]
-            print(f"   CSV Export: Found {len(calc_fields)} calculated fields: {[f.get('name', 'Unknown') for f in calc_fields]}")
-            
-            # Write CSV with field mapping including usage and calculated field info
-            with open(csv_file, 'w', newline='', encoding='utf-8') as csvfile:
-                fieldnames = ['Original_Field_Name', 'Tableau_Field_Name', 'Data_Type', 'Table_Name', 'Table_Reference_SQL', 'Used_In_Workbook', 'Is_Calculated', 'Calculation_Formula']
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        # For single datasource workbooks, use simple filenames
+        if len(data_sources) == 1:
+            csv_file = os.path.join(workbook_folder, "field_mapping.csv")
+            ds = data_sources[0]
+            if ds['fields']:
+                self._write_field_mapping_csv(csv_file, ds)
+                print(f"✅ Created field mapping CSV: {csv_file}")
+        else:
+            # Multiple datasources - use datasource names
+            for ds in data_sources:
+                if not ds['fields']:
+                    continue
                 
-                # Write header
-                writer.writeheader()
+                datasource_name = ds.get('caption') or ds.get('name') or 'Unknown'
+                safe_datasource = datasource_name.replace(' ', '_').replace('/', '_')
+                safe_datasource = ''.join(c for c in safe_datasource if c.isalnum() or c in '_-')
+                csv_file = os.path.join(workbook_folder, f"{safe_datasource}_field_mapping.csv")
                 
-                # Write field mapping data in sorted order
-                for field in sorted_fields:
-                    # Clean up field names for better readability
-                    original_name = field.get('remote_name', '') or ''
-                    original_name = original_name.strip() if original_name else ''
-                    tableau_name = field.get('name', '') or ''
-                    tableau_name = tableau_name.strip() if tableau_name else ''
-                    is_calculated = field.get('is_calculated', False)
-                    calculation_formula = field.get('calculation_formula', '') or ''
-                    
-                    # For calculated fields, we might not have original_name
-                    if is_calculated and not original_name:
-                        original_name = tableau_name  # Use tableau name as original for calculated fields
-                    
-                    # Ensure we have valid data
-                    if not tableau_name:
-                        continue
-                    
-                    # Format table reference as 'Table.field_name as tableau_name'
-                    table_ref = field.get('table_reference', '') or ''
-                    table_ref = table_ref.strip() if table_ref else ''
-                    if table_ref and original_name and not is_calculated:
-                        if table_ref != tableau_name:
-                            # Field was renamed in Tableau - add quotes around tableau_name if it has spaces
-                            if ' ' in tableau_name:
-                                table_ref_sql = f"{table_ref}.{original_name} as '{tableau_name}'"
-                            else:
-                                table_ref_sql = f"{table_ref}.{original_name} as {tableau_name}"
+                self._write_field_mapping_csv(csv_file, ds)
+                print(f"✅ Created field mapping CSV: {csv_file}")
+
+    def _write_field_mapping_csv(self, csv_file, ds):
+        """Helper method to write field mapping CSV for a single datasource."""
+        # Sort fields by table name first, then by column name
+        # Put calculated fields at the end since they don't have table names
+        sorted_fields = sorted(ds['fields'], key=lambda x: (
+            x.get('is_calculated', False),  # Calculated fields last
+            x.get('table_name', ''), 
+            x.get('remote_name', '')
+        ))
+        
+        # Debug: Show calculated fields
+        calc_fields = [f for f in ds['fields'] if f.get('is_calculated', False)]
+        print(f"   CSV Export: Found {len(calc_fields)} calculated fields: {[f.get('name', 'Unknown') for f in calc_fields]}")
+        
+        # Write CSV with field mapping including usage and calculated field info
+        with open(csv_file, 'w', newline='', encoding='utf-8') as csvfile:
+            fieldnames = ['Original_Field_Name', 'Tableau_Field_Name', 'Data_Type', 'Table_Name', 'Table_Reference_SQL', 'Used_In_Workbook', 'Is_Calculated', 'Is_Parameter', 'Calculation_Formula']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            
+            # Write header
+            writer.writeheader()
+            
+            # Write field mapping data in sorted order
+            for field in sorted_fields:
+                # Clean up field names for better readability
+                original_name = field.get('remote_name', '') or ''
+                original_name = original_name.strip() if original_name else ''
+                tableau_name = field.get('name', '') or ''
+                tableau_name = tableau_name.strip() if tableau_name else ''
+                is_calculated = field.get('is_calculated', False)
+                is_parameter = field.get('is_parameter', False)
+                calculation_formula = field.get('calculation_formula', '') or ''
+                
+                # For calculated fields, we might not have original_name
+                if is_calculated and not original_name:
+                    original_name = tableau_name  # Use tableau name as original for calculated fields
+                
+                # Ensure we have valid data
+                if not tableau_name:
+                    continue
+                
+                # Format table reference as 'Table.field_name as tableau_name'
+                table_ref = field.get('table_reference', '') or ''
+                table_ref = table_ref.strip() if table_ref else ''
+                if table_ref and original_name and not is_calculated:
+                    if table_ref != tableau_name:
+                        # Field was renamed in Tableau - add quotes around tableau_name if it has spaces
+                        if ' ' in tableau_name:
+                            table_ref_sql = f"{table_ref}.{original_name} as '{tableau_name}'"
                         else:
-                            # Field wasn't renamed, just use original
-                            table_ref_sql = f"{table_ref}.{original_name}"
-                    elif is_calculated:
-                        # For calculated fields, show the actual Tableau field name
-                        tableau_display_name = field.get('name', tableau_name)
-                        table_ref_sql = f"CALCULATED: {tableau_display_name}"
+                            table_ref_sql = f"{table_ref}.{original_name} as {tableau_name}"
                     else:
-                        # Use table_name as fallback
-                        table_name = field.get('table_name', 'Unknown') or 'Unknown'
-                        table_ref_sql = f"{table_name}.{original_name}"
-                    
-                    # Clean up any special characters that might cause CSV issues
-                    table_ref_sql = table_ref_sql.replace('"', '').replace("'", '').replace('\n', ' ').replace('\r', ' ')
-                    
-                    # Mark if field is used in the workbook
-                    used_status = 'Yes' if field.get('used_in_workbook', False) else 'No'
-                    
-                    # Mark if field is calculated
-                    calculated_status = 'Yes' if is_calculated else 'No'
-                    
-                    # Clean up calculation formula for CSV
-                    clean_formula = calculation_formula.replace('\n', ' ').replace('\r', ' ').replace('"', "'") if calculation_formula else ''
-                    
-                    # For calculated fields, use "Workbook" as table name instead of "Unknown"
-                    table_name_for_csv = field.get('table_name', 'Unknown')
-                    if is_calculated and (table_name_for_csv == 'Unknown' or not table_name_for_csv):
-                        table_name_for_csv = 'Workbook'
-                    
-                    writer.writerow({
-                        'Original_Field_Name': original_name,
-                        'Tableau_Field_Name': tableau_name,
-                        'Data_Type': field.get('datatype', 'Unknown'),
-                        'Table_Name': table_name_for_csv,
-                        'Table_Reference_SQL': table_ref_sql,
-                        'Used_In_Workbook': used_status,
-                        'Is_Calculated': calculated_status,
-                        'Calculation_Formula': clean_formula
-                    })
-            
-            print(f"✅ Created field mapping CSV: {csv_file}")
+                        # Field wasn't renamed, just use original
+                        table_ref_sql = f"{table_ref}.{original_name}"
+                elif is_calculated:
+                    # For calculated fields, show the actual Tableau field name
+                    tableau_display_name = field.get('name', tableau_name)
+                    if is_parameter:
+                        table_ref_sql = f"PARAMETER: {tableau_display_name}"
+                    else:
+                        table_ref_sql = f"CALCULATED: {tableau_display_name}"
+                else:
+                    # Use table_name as fallback
+                    table_name = field.get('table_name', 'Unknown') or 'Unknown'
+                    table_ref_sql = f"{table_name}.{original_name}"
+                
+                # Clean up any special characters that might cause CSV issues
+                table_ref_sql = table_ref_sql.replace('"', '').replace("'", '').replace('\n', ' ').replace('\r', ' ')
+                
+                # Mark if field is used in the workbook
+                used_status = 'Yes' if field.get('used_in_workbook', False) else 'No'
+                
+                # Mark if field is calculated
+                calculated_status = 'Yes' if is_calculated else 'No'
+                
+                # Mark if field is a parameter
+                parameter_status = 'Yes' if is_parameter else 'No'
+                
+                # Clean up calculation formula for CSV
+                clean_formula = calculation_formula.replace('\n', ' ').replace('\r', ' ').replace('"', "'") if calculation_formula else ''
+                
+                # For calculated fields, use "Workbook" as table name instead of "Unknown"
+                table_name_for_csv = field.get('table_name', 'Unknown')
+                if is_calculated and (table_name_for_csv == 'Unknown' or not table_name_for_csv):
+                    table_name_for_csv = 'Workbook'
+                
+                writer.writerow({
+                    'Original_Field_Name': original_name,
+                    'Tableau_Field_Name': tableau_name,
+                    'Data_Type': field.get('datatype', 'Unknown'),
+                    'Table_Name': table_name_for_csv,
+                    'Table_Reference_SQL': table_ref_sql,
+                    'Used_In_Workbook': used_status,
+                    'Is_Calculated': calculated_status,
+                    'Is_Parameter': parameter_status,
+                    'Calculation_Formula': clean_formula
+                })
 
     def export_setup_guide_txt(self, output_dir, data_sources):
         """Export a simple text setup guide for Power BI migration."""
+        # Create workbook-specific folder
+        if data_sources:
+            workbook_name = data_sources[0].get('workbook_name', 'Unknown')
+            safe_workbook = workbook_name.replace(' ', '_').replace('/', '_')
+            safe_workbook = ''.join(c for c in safe_workbook if c.isalnum() or c in '_-')
+            workbook_folder = os.path.join(output_dir, safe_workbook)
+            os.makedirs(workbook_folder, exist_ok=True)
+        else:
+            workbook_folder = output_dir
+        
         for datasource_info in data_sources:
-            # Create filename
-            safe_name = create_safe_filename(datasource_info['caption'])
-            txt_filename = f"{safe_name}_setup_guide.txt"
-            txt_path = os.path.join(output_dir, txt_filename)
+            # Create filename using datasource name only (since we're in workbook folder)
+            # Use name if caption is empty, fallback to 'Unknown' if both are empty
+            datasource_name = datasource_info.get('caption') or datasource_info.get('name') or 'Unknown'
+            safe_datasource = datasource_name.replace(' ', '_').replace('/', '_')
+            safe_datasource = ''.join(c for c in safe_datasource if c.isalnum() or c in '_-')
+            txt_filename = f"{safe_datasource}_setup_guide.txt"
+            txt_path = os.path.join(workbook_folder, txt_filename)
             
             with open(txt_path, 'w', encoding='utf-8') as f:
                 f.write(f"POWER BI SETUP GUIDE\n")
@@ -156,8 +209,10 @@ class CSVExporter:
                 # Count used fields and calculated fields
                 used_fields = sum(1 for field in datasource_info.get('fields', []) if field.get('used_in_workbook', False))
                 calculated_fields = sum(1 for field in datasource_info.get('fields', []) if field.get('is_calculated', False))
+                parameter_fields = sum(1 for field in datasource_info.get('fields', []) if field.get('is_parameter', False))
                 f.write(f"Fields Used in Workbook: {used_fields}\n")
-                f.write(f"Calculated Fields: {calculated_fields}\n\n")
+                f.write(f"Calculated Fields: {calculated_fields}\n")
+                f.write(f"Parameter Fields: {parameter_fields}\n\n")
                 
                 # Connection details
                 if datasource_info.get('connections'):
@@ -192,75 +247,108 @@ class CSVExporter:
                     f.write(f"MAIN TABLE: {clean_main_table} (aliased as {first_alias})\n\n")
                 
                 # Join conditions with types
+                # Always initialize unique_relationships to avoid scope issues
+                unique_relationships = {}
+                
                 if datasource_info.get('sql_info', {}).get('relationships') or datasource_info.get('sql_info', {}).get('join_conditions'):
                     f.write(f"CREATE THESE RELATIONSHIPS IN POWER BI MODEL VIEW:\n")
                     f.write(f"------------------------------------------------\n")
                     
-                    # Collect unique relationships to avoid duplicates
-                    unique_relationships = {}
-                    
                     # Process main relationships
                     if datasource_info['sql_info'].get('relationships'):
                         for rel in datasource_info['sql_info']['relationships']:
-                            join_type = rel.get('join_type', 'LEFT JOIN').upper()
-                            
-                            # Create a unique key for this relationship
-                            conditions_key = '|'.join(sorted(rel.get('conditions', [])))
-                            if conditions_key not in unique_relationships:
-                                unique_relationships[conditions_key] = {
-                                    'join_type': join_type,
-                                    'conditions': rel.get('conditions', []),
-                                    'tables': rel.get('tables', [])
-                                }
+                            try:
+                                join_type = rel.get('join_type', 'LEFT JOIN').upper()
+                                
+                                # Safely get conditions - handle missing or malformed data
+                                conditions = rel.get('conditions', [])
+                                if not isinstance(conditions, list):
+                                    conditions = []
+                                
+                                # Create a unique key for this relationship
+                                if conditions:
+                                    conditions_key = '|'.join(sorted([str(c) for c in conditions if c]))
+                                else:
+                                    # If no conditions, use a different key
+                                    left_table = rel.get('left_table', 'unknown')
+                                    right_table = rel.get('right_table', 'unknown')
+                                    conditions_key = f"{left_table}_{right_table}"
+                                
+                                if conditions_key and conditions_key not in unique_relationships:
+                                    unique_relationships[conditions_key] = {
+                                        'join_type': join_type,
+                                        'conditions': conditions,
+                                        'tables': rel.get('tables', []),
+                                        'left_table': rel.get('left_table', ''),
+                                        'right_table': rel.get('right_table', '')
+                                    }
+                            except Exception as e:
+                                # Skip malformed relationships
+                                print(f"Warning: Skipping malformed relationship: {e}")
+                                continue
                     
                     # Process additional join conditions
                     additional_joins = datasource_info['sql_info'].get('join_conditions', [])
-                    for condition in additional_joins:
-                        if condition not in [cond for rel in unique_relationships.values() for cond in rel['conditions']]:
-                            # This is a truly additional condition
-                            unique_relationships[f"additional_{condition}"] = {
-                                'join_type': 'LEFT JOIN',
-                                'conditions': [condition],
-                                'tables': []
-                            }
+                    if isinstance(additional_joins, list):
+                        for condition in additional_joins:
+                            if condition and str(condition) not in [str(cond) for rel in unique_relationships.values() for cond in rel.get('conditions', [])]:
+                                # This is a truly additional condition
+                                unique_relationships[f"additional_{condition}"] = {
+                                    'join_type': 'LEFT JOIN',
+                                    'conditions': [condition],
+                                    'tables': [],
+                                    'left_table': '',
+                                    'right_table': ''
+                                }
                     
                     # Display unique relationships in simple SQL-like format
                     if unique_relationships:
                         for i, (key, rel) in enumerate(unique_relationships.items(), 1):
-                            join_type = rel['join_type']
-                            
-                            # Extract table names from conditions for simple display
-                            if rel['conditions']:
-                                # Get the first condition to show the basic relationship
-                                first_condition = rel['conditions'][0]
-                                if '=' in first_condition:
-                                    left_part, right_part = first_condition.split('=', 1)
-                                    left_table = left_part.split('.')[0].strip()
-                                    right_part = right_part.split('.')[0].strip()
-                                    
-                                    # Convert aliases to actual table names
-                                    actual_left_table = self.get_actual_table_name(left_table, datasource_info)
-                                    actual_right_table = self.get_actual_table_name(right_part, datasource_info)
-                                    
-                                    # Extract field names from the condition
-                                    left_field = left_part.split('.')[1].strip() if '.' in left_part else ''
-                                    right_field = right_part.split('.')[1].strip() if '.' in right_part else ''
-                                    
-                                    # Get original Tableau aliases (with spaces) from the table mapping
-                                    left_original_alias = self.get_original_alias(left_table, datasource_info)
-                                    right_original_alias = self.get_original_alias(right_part, datasource_info)
-                                    
-                                    # Format the relationship with AS for both tables
-                                    # Add quotes around aliases with spaces
-                                    left_alias = f'"{left_original_alias}"' if ' ' in left_original_alias else left_original_alias
-                                    right_alias = f'"{right_original_alias}"' if ' ' in right_original_alias else right_original_alias
-                                    f.write(f"{i}. {join_type} JOIN {actual_left_table} AS {left_alias} ON {actual_left_table}.{left_field} = {actual_right_table} AS {right_alias}.{right_field}\n")
+                            try:
+                                join_type = rel['join_type']
+                                
+                                # Extract table names from conditions for simple display
+                                if rel['conditions']:
+                                    # Get the first condition to show the basic relationship
+                                    first_condition = str(rel['conditions'][0])
+                                    if '=' in first_condition:
+                                        left_part, right_part = first_condition.split('=', 1)
+                                        left_table = left_part.split('.')[0].strip()
+                                        right_part = right_part.split('.')[0].strip()
+                                        
+                                        # Convert aliases to actual table names
+                                        actual_left_table = self.get_actual_table_name(left_table, datasource_info)
+                                        actual_right_table = self.get_actual_table_name(right_part, datasource_info)
+                                        
+                                        # Extract field names from the condition
+                                        left_field = left_part.split('.')[1].strip() if '.' in left_part else ''
+                                        right_field = right_part.split('.')[1].strip() if '.' in right_part else ''
+                                        
+                                        # Get original Tableau aliases (with spaces) from the table mapping
+                                        left_original_alias = self.get_original_alias(left_table, datasource_info)
+                                        right_original_alias = self.get_original_alias(right_part, datasource_info)
+                                        
+                                        # Format the relationship with AS for both tables
+                                        # Add quotes around aliases with spaces
+                                        left_alias = f'"{left_original_alias}"' if ' ' in left_original_alias else left_original_alias
+                                        right_alias = f'"{right_original_alias}"' if ' ' in right_original_alias else right_alias
+                                        f.write(f"{i}. {join_type} JOIN {actual_left_table} AS {left_alias} ON {actual_left_table}.{left_field} = {actual_right_table} AS {right_alias}.{right_field}\n")
+                                    else:
+                                        f.write(f"{i}. {join_type} relationship: {first_condition}\n")
                                 else:
-                                    f.write(f"{i}. {join_type} relationship: {first_condition}\n")
-                            else:
-                                f.write(f"{i}. {join_type} relationship\n")
+                                    # Fallback to basic table info if no conditions
+                                    left_table = rel.get('left_table', 'unknown')
+                                    right_table = rel.get('right_table', 'unknown')
+                                    if left_table and right_table:
+                                        f.write(f"{i}. {join_type} relationship between {left_table} and {right_table}\n")
+                                    else:
+                                        f.write(f"{i}. {join_type} relationship\n")
+                            except Exception as e:
+                                # Skip problematic relationships
+                                print(f"Warning: Error processing relationship {i}: {e}")
+                                continue
                     
-                                    # No fluff - just the relationships
+                    # No fluff - just the relationships
                 if not unique_relationships:
                     f.write(f"No relationships found\n")
                 
@@ -270,11 +358,35 @@ class CSVExporter:
                              field.get('table_reference') and  # Must have a table reference (not calculated)
                              field.get('remote_name')]  # Must have an original field name
                 
-                # Calculated fields section
+                # Separate parameters and calculated fields
+                parameter_fields = [field for field in datasource_info.get('fields', []) 
+                                  if field.get('is_parameter', False) and 
+                                  field.get('used_in_workbook', False)]
+                
                 calculated_fields = [field for field in datasource_info.get('fields', []) 
                                    if field.get('is_calculated', False) and 
+                                   not field.get('is_parameter', False) and  # Exclude parameters
                                    field.get('used_in_workbook', False)]
                 
+                # Parameters section
+                if parameter_fields:
+                    f.write(f"\n")
+                    f.write(f"PARAMETERS:\n")
+                    f.write(f"-----------\n")
+                    
+                    # Sort parameter fields by name
+                    sorted_param_fields = sorted(parameter_fields, key=lambda x: x.get('name', ''))
+                    
+                    for field in sorted_param_fields:
+                        field_name = field.get('name', '').strip()
+                        formula = field.get('calculation_formula', '').strip()
+                        data_type = field.get('data_type', field.get('datatype', 'Unknown'))
+                        
+                        f.write(f"{field_name} (Parameter - {data_type}):\n")
+                        f.write(f"  {formula}\n")
+                        f.write(f"  {'-' * 50}\n\n")
+                
+                # Calculated fields section
                 if calculated_fields:
                     f.write(f"\n")
                     f.write(f"CALCULATED FIELDS:\n")
@@ -286,11 +398,39 @@ class CSVExporter:
                     for field in sorted_calc_fields:
                         field_name = field.get('name', '').strip()
                         formula = field.get('calculation_formula', '').strip()
-                        data_type = field.get('data_type', 'Unknown')
+                        data_type = field.get('data_type', field.get('datatype', 'Unknown'))
                         role = field.get('role', 'Unknown')
+                        aggregation = field.get('aggregation', 'Unknown')
                         
-                        f.write(f"{field_name} ({data_type}, {role}):\n")
-                        f.write(f"  {formula}\n\n")
+                        # Try to infer better data types and roles from the formula
+                        if data_type == 'Unknown' and formula:
+                            if 'DATEDIFF' in formula or 'DATETRUNC' in formula:
+                                data_type = 'date'
+                            elif 'SUM(' in formula or 'AVG(' in formula or 'COUNT(' in formula:
+                                data_type = 'numeric'
+                            elif 'IF' in formula or 'CASE' in formula or 'THEN' in formula:
+                                data_type = 'string'
+                        
+                        if role == 'Unknown' and formula:
+                            if 'SUM(' in formula or 'AVG(' in formula or 'COUNT(' in formula:
+                                role = 'measure'
+                            elif 'IF' in formula or 'CASE' in formula or 'THEN' in formula:
+                                role = 'dimension'
+                        
+                        # For calculated fields, show the most meaningful information
+                        if aggregation != 'Unknown' and aggregation != 'None':
+                            f.write(f"{field_name} ({aggregation}):\n")
+                        elif data_type != 'Unknown' and role != 'Unknown':
+                            f.write(f"{field_name} ({data_type}, {role}):\n")
+                        elif data_type != 'Unknown':
+                            f.write(f"{field_name} ({data_type}):\n")
+                        elif role != 'Unknown':
+                            f.write(f"{field_name} ({role}):\n")
+                        else:
+                            f.write(f"{field_name}:\n")
+                        
+                        f.write(f"  {formula}\n")
+                        f.write(f"  {'-' * 50}\n\n")
                 
                 if used_fields:
                     f.write(f"\n")
@@ -331,143 +471,166 @@ class CSVExporter:
 
     def export_dashboard_usage_csv(self, output_dir, data_sources, dashboard_info):
         """Export dashboard and worksheet usage information to CSV."""
-        os.makedirs(output_dir, exist_ok=True)
+        # Create workbook-specific folder
+        if data_sources:
+            workbook_name = data_sources[0].get('workbook_name', 'Unknown')
+            safe_workbook = workbook_name.replace(' ', '_').replace('/', '_')
+            safe_workbook = ''.join(c for c in safe_workbook if c.isalnum() or c in '_-')
+            workbook_folder = os.path.join(output_dir, safe_workbook)
+            os.makedirs(workbook_folder, exist_ok=True)
+        else:
+            workbook_folder = output_dir
         
-        for ds in data_sources:
-            if not dashboard_info:
-                continue
-            
-            # Create CSV filename
-            safe_name = ds['caption'].replace(' ', '_').replace('/', '_')
-            safe_name = ''.join(c for c in safe_name if c.isalnum() or c in '_-')
-            csv_file = os.path.join(output_dir, f"{safe_name}_dashboard_usage.csv")
-            
-            # Write CSV with dashboard and worksheet information
-            with open(csv_file, 'w', newline='', encoding='utf-8') as csvfile:
-                fieldnames = ['Item_Name', 'Item_Type', 'Chart_Type', 'Mark_Type', 'Size', 'Used_Fields', 'Filters', 'Filter_Function', 'Filter_Operation', 'Filter_Values', 'Filter_Description', 'Slicers', 'Rows_Layout', 'Columns_Layout', 'Cards_Layout', 'Aggregation', 'Power_BI_Recommendations']
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        # For single datasource workbooks, use simple filenames
+        if len(data_sources) == 1:
+            csv_file = os.path.join(workbook_folder, "dashboard_usage.csv")
+        else:
+            # Multiple datasources - use datasource names
+            for ds in data_sources:
+                if not dashboard_info:
+                    continue
                 
-                # Write header
-                writer.writeheader()
+                datasource_name = ds.get('caption') or ds.get('name') or 'Unknown'
+                safe_datasource = datasource_name.replace(' ', '_').replace('/', '_')
+                safe_datasource = ''.join(c for c in safe_datasource if c.isalnum() or c in '_-')
+                csv_file = os.path.join(workbook_folder, f"{safe_datasource}_dashboard_usage.csv")
                 
-                # Write dashboard and worksheet data
-                for item_name, item_info in dashboard_info.items():
-                    item_type = item_info.get('type', 'Unknown')
-                    
-                    if item_type == 'worksheet':
-                        chart_type = item_info.get('class', 'Unknown')
-                        mark_type = item_info.get('mark_type', 'Unknown')
-                        size = 'N/A'
-                        used_fields = '; '.join(item_info.get('used_fields', []))
-                        
-                        # Format filters with type and field info
-                        filters = []
-                        filter_functions = []
-                        filter_operations = []
-                        filter_values = []
-                        filter_descriptions = []
-                        
-                        for f in item_info.get('filters', []):
-                            filter_desc = f"{f['field']}({f['type']})"
-                            if f['name'] and f['name'] != f['field']:
-                                filter_desc = f"{f['name']}: {filter_desc}"
-                            filters.append(filter_desc)
-                            
-                            # Extract detailed filter information
-                            filter_functions.append(f.get('function', ''))
-                            filter_operations.append(f.get('operation', ''))
-                            
-                            # Format filter values
-                            values = f.get('values', [])
-                            if values:
-                                filter_values.append('; '.join(values))
-                            else:
-                                filter_values.append('')
-                            
-                            filter_descriptions.append(f.get('description', ''))
-                        
-                        filters_str = '; '.join(filters)
-                        filter_functions_str = '; '.join(filter_functions)
-                        filter_operations_str = '; '.join(filter_operations)
-                        filter_values_str = '; '.join(filter_values)
-                        filter_descriptions_str = '; '.join(filter_descriptions)
-                        
-                        # Format slicers
-                        slicers = '; '.join(item_info.get('slicers', []))
-                        
-                        # Format layout information
-                        rows_layout = '; '.join(item_info.get('rows_layout', []))
-                        columns_layout = '; '.join(item_info.get('columns_layout', []))
-                        
-                        # Format cards layout (UI structure)
-                        cards_layout = []
-                        for edge, cards in item_info.get('cards_layout', {}).items():
-                            cards_layout.append(f"{edge}: {', '.join(cards)}")
-                        cards_layout_str = '; '.join(cards_layout)
-                        
-                        # Aggregation setting
-                        aggregation = 'Yes' if item_info.get('aggregation_enabled', False) else 'No'
-                        
-                        # Power BI recommendations based on chart type and layout
-                        powerbi_recommendations = self.get_powerbi_chart_recommendation(chart_type, item_info)
-                        
-                    elif item_type == 'dashboard':
-                        chart_type = 'Dashboard'
-                        mark_type = 'N/A'
-                        width = item_info.get('width', 'Unknown')
-                        height = item_info.get('height', 'Unknown')
-                        size = f"{width}x{height}"
-                        used_fields = 'N/A'
-                        filters = '; '.join([f"{f['field']}({f['type']})" for f in item_info.get('filters', [])])
-                        filter_functions_str = 'N/A'
-                        filter_operations_str = 'N/A'
-                        filter_values_str = 'N/A'
-                        filter_descriptions_str = 'N/A'
-                        slicers = 'N/A'
-                        rows_layout = 'N/A'
-                        columns_layout = 'N/A'
-                        cards_layout_str = 'N/A'
-                        aggregation = 'N/A'
-                        powerbi_recommendations = 'Create new Power BI report page with same layout'
-                    
-                    else:
-                        chart_type = 'Unknown'
-                        mark_type = 'Unknown'
-                        size = 'N/A'
-                        used_fields = 'N/A'
-                        filters = 'N/A'
-                        filter_functions_str = 'N/A'
-                        filter_operations_str = 'N/A'
-                        filter_values_str = 'N/A'
-                        filter_descriptions_str = 'N/A'
-                        slicers = 'N/A'
-                        rows_layout = 'N/A'
-                        columns_layout = 'N/A'
-                        cards_layout_str = 'N/A'
-                        aggregation = 'N/A'
-                        powerbi_recommendations = 'Review manually'
-                    
-                    writer.writerow({
-                        'Item_Name': item_name,
-                        'Item_Type': item_type,
-                        'Chart_Type': chart_type,
-                        'Mark_Type': mark_type,
-                        'Size': size,
-                        'Used_Fields': used_fields,
-                        'Filters': filters_str if item_type == 'worksheet' else filters,
-                        'Filter_Function': filter_functions_str,
-                        'Filter_Operation': filter_operations_str,
-                        'Filter_Values': filter_values_str,
-                        'Filter_Description': filter_descriptions_str,
-                        'Slicers': slicers,
-                        'Rows_Layout': rows_layout,
-                        'Columns_Layout': columns_layout,
-                        'Cards_Layout': cards_layout_str,
-                        'Aggregation': aggregation,
-                        'Power_BI_Recommendations': powerbi_recommendations
-                    })
+                self._write_dashboard_usage_csv(csv_file, dashboard_info)
+                print(f"✅ Created dashboard usage CSV: {csv_file}")
             
+            return  # Exit early for multiple datasources
+        
+        # Single datasource processing
+        if dashboard_info:
+            self._write_dashboard_usage_csv(csv_file, dashboard_info)
             print(f"✅ Created dashboard usage CSV: {csv_file}")
+
+    def _write_dashboard_usage_csv(self, csv_file, dashboard_info):
+        """Helper method to write dashboard usage CSV."""
+        # Write CSV with dashboard and worksheet information
+        with open(csv_file, 'w', newline='', encoding='utf-8') as csvfile:
+            fieldnames = ['Item_Name', 'Item_Type', 'Chart_Type', 'Mark_Type', 'Size', 'Used_Fields', 'Filters', 'Filter_Function', 'Filter_Operation', 'Filter_Values', 'Filter_Description', 'Slicers', 'Rows_Layout', 'Columns_Layout', 'Cards_Layout', 'Aggregation', 'Power_BI_Recommendations']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            
+            # Write header
+            writer.writeheader()
+            
+            # Write dashboard and worksheet data
+            for item_name, item_info in dashboard_info.items():
+                item_type = item_info.get('type', 'Unknown')
+                
+                if item_type == 'worksheet':
+                    chart_type = item_info.get('class', 'Unknown')
+                    mark_type = item_info.get('mark_type', 'Unknown')
+                    size = 'N/A'
+                    used_fields = '; '.join(item_info.get('used_fields', []))
+                    
+                    # Format filters with type and field info
+                    filters = []
+                    filter_functions = []
+                    filter_operations = []
+                    filter_values = []
+                    filter_descriptions = []
+                    
+                    for f in item_info.get('filters', []):
+                        filter_desc = f"{f['field']}({f['type']})"
+                        if f['name'] and f['name'] != f['field']:
+                            filter_desc = f"{f['name']}: {filter_desc}"
+                        filters.append(filter_desc)
+                        
+                        # Extract detailed filter information
+                        filter_functions.append(f.get('function', ''))
+                        filter_operations.append(f.get('operation', ''))
+                        
+                        # Format filter values
+                        values = f.get('values', [])
+                        if values:
+                            filter_values.append('; '.join(values))
+                        else:
+                            filter_values.append('')
+                        
+                        filter_descriptions.append(f.get('description', ''))
+                    
+                    filters_str = '; '.join(filters)
+                    filter_functions_str = '; '.join(filter_functions)
+                    filter_operations_str = '; '.join(filter_operations)
+                    filter_values_str = '; '.join(filter_values)
+                    filter_descriptions_str = '; '.join(filter_descriptions)
+                    
+                    # Format slicers
+                    slicers = '; '.join(item_info.get('slicers', []))
+                    
+                    # Format layout information
+                    rows_layout = '; '.join(item_info.get('rows_layout', []))
+                    columns_layout = '; '.join(item_info.get('columns_layout', []))
+                    
+                    # Format cards layout (UI structure)
+                    cards_layout = []
+                    for edge, cards in item_info.get('cards_layout', {}).items():
+                        cards_layout.append(f"{edge}: {', '.join(cards)}")
+                    cards_layout_str = '; '.join(cards_layout)
+                    
+                    # Aggregation setting
+                    aggregation = 'Yes' if item_info.get('aggregation_enabled', False) else 'No'
+                    
+                    # Power BI recommendations based on chart type and layout
+                    powerbi_recommendations = self.get_powerbi_chart_recommendation(chart_type, item_info)
+                    
+                elif item_type == 'dashboard':
+                    chart_type = 'Dashboard'
+                    mark_type = 'N/A'
+                    width = item_info.get('width', 'Unknown')
+                    height = item_info.get('height', 'Unknown')
+                    size = f"{width}x{height}"
+                    used_fields = 'N/A'
+                    filters = '; '.join([f"{f['field']}({f['type']})" for f in item_info.get('filters', [])])
+                    filter_functions_str = 'N/A'
+                    filter_operations_str = 'N/A'
+                    filter_values_str = 'N/A'
+                    filter_descriptions_str = 'N/A'
+                    slicers = 'N/A'
+                    rows_layout = 'N/A'
+                    columns_layout = 'N/A'
+                    cards_layout_str = 'N/A'
+                    aggregation = 'N/A'
+                    powerbi_recommendations = 'Create new Power BI report page with same layout'
+                
+                else:
+                    chart_type = 'Unknown'
+                    mark_type = 'Unknown'
+                    size = 'N/A'
+                    used_fields = 'N/A'
+                    filters = 'N/A'
+                    filter_functions_str = 'N/A'
+                    filter_operations_str = 'N/A'
+                    filter_values_str = 'N/A'
+                    filter_descriptions_str = 'N/A'
+                    slicers = 'N/A'
+                    rows_layout = 'N/A'
+                    columns_layout = 'N/A'
+                    cards_layout_str = 'N/A'
+                    aggregation = 'N/A'
+                    powerbi_recommendations = 'Review manually'
+                
+                writer.writerow({
+                    'Item_Name': item_name,
+                    'Item_Type': item_type,
+                    'Chart_Type': chart_type,
+                    'Mark_Type': mark_type,
+                    'Size': size,
+                    'Used_Fields': used_fields,
+                    'Filters': filters_str if item_type == 'worksheet' else filters,
+                    'Filter_Function': filter_functions_str,
+                    'Filter_Operation': filter_operations_str,
+                    'Filter_Values': filter_values_str,
+                    'Filter_Description': filter_descriptions_str,
+                    'Slicers': slicers,
+                    'Rows_Layout': rows_layout,
+                    'Columns_Layout': columns_layout,
+                    'Cards_Layout': cards_layout_str,
+                    'Aggregation': aggregation,
+                    'Power_BI_Recommendations': powerbi_recommendations
+                })
 
     def get_powerbi_chart_recommendation(self, tableau_chart_type, item_info=None):
         """Get Power BI chart recommendations based on Tableau chart type and layout."""
