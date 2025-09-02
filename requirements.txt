@@ -5,6 +5,7 @@ pandas>=1.5.0
 lxml>=4.9.0
 openpyxl>=3.0.10
 Jinja2>=3.1.0
+tableauhyperapi>=0.0.18
 
 # Note: tkinter is included with Python by default
 # If you get import errors, install with: pip install tk

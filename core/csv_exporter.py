@@ -90,13 +90,16 @@ class CSVExporter:
             x.get('remote_name', '')
         ))
         
-        # Debug: Show calculated fields
+        # Debug: Show calculated fields and parameters
         calc_fields = [f for f in ds['fields'] if f.get('is_calculated', False)]
+        param_fields = [f for f in ds['fields'] if f.get('is_parameter', False)]
         print(f"   CSV Export: Found {len(calc_fields)} calculated fields: {[f.get('name', 'Unknown') for f in calc_fields]}")
+        if param_fields:
+            print(f"   CSV Export: Found {len(param_fields)} parameters: {[f.get('name', 'Unknown') for f in param_fields]}")
         
         # Write CSV with field mapping including usage and calculated field info
         with open(csv_file, 'w', newline='', encoding='utf-8') as csvfile:
-            fieldnames = ['Original_Field_Name', 'Tableau_Field_Name', 'Data_Type', 'Table_Name', 'Table_Reference_SQL', 'Used_In_Workbook', 'Is_Calculated', 'Is_Parameter', 'Calculation_Formula']
+            fieldnames = ['Original_Field_Name', 'Tableau_Field_Name', 'Data_Type', 'Table_Name', 'Table_Reference_SQL', 'Used_In_Workbook', 'Type', 'Calculation_Formula']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             
             # Write header
@@ -124,7 +127,20 @@ class CSVExporter:
                 # Format table reference as 'Table.field_name as tableau_name'
                 table_ref = field.get('table_reference', '') or ''
                 table_ref = table_ref.strip() if table_ref else ''
-                if table_ref and original_name and not is_calculated:
+                
+                # Special handling for parameters
+                if is_parameter:
+                    # For parameters, show parameter type and current value
+                    param_value = field.get('calculation_formula', '')
+                    if param_value:
+                        table_ref_sql = f"PARAMETER: {tableau_name} = {param_value}"
+                    else:
+                        table_ref_sql = f"PARAMETER: {tableau_name}"
+                elif is_calculated:
+                    # For calculated fields, show the actual Tableau field name
+                    tableau_display_name = field.get('name', tableau_name)
+                    table_ref_sql = f"CALCULATED: {tableau_display_name}"
+                elif table_ref and original_name and not is_calculated:
                     if table_ref != tableau_name:
                         # Field was renamed in Tableau - add quotes around tableau_name if it has spaces
                         if ' ' in tableau_name:
@@ -134,13 +150,6 @@ class CSVExporter:
                     else:
                         # Field wasn't renamed, just use original
                         table_ref_sql = f"{table_ref}.{original_name}"
-                elif is_calculated:
-                    # For calculated fields, show the actual Tableau field name
-                    tableau_display_name = field.get('name', tableau_name)
-                    if is_parameter:
-                        table_ref_sql = f"PARAMETER: {tableau_display_name}"
-                    else:
-                        table_ref_sql = f"CALCULATED: {tableau_display_name}"
                 else:
                     # Use table_name as fallback
                     table_name = field.get('table_name', 'Unknown') or 'Unknown'
@@ -152,11 +161,13 @@ class CSVExporter:
                 # Mark if field is used in the workbook
                 used_status = 'Yes' if field.get('used_in_workbook', False) else 'No'
                 
-                # Mark if field is calculated
-                calculated_status = 'Yes' if is_calculated else 'No'
-                
-                # Mark if field is a parameter
-                parameter_status = 'Yes' if is_parameter else 'No'
+                # Determine field type
+                if is_parameter:
+                    field_type = 'Parameter'
+                elif is_calculated:
+                    field_type = 'Calculated Field'
+                else:
+                    field_type = 'Column'
                 
                 # Clean up calculation formula for CSV
                 clean_formula = calculation_formula.replace('\n', ' ').replace('\r', ' ').replace('"', "'") if calculation_formula else ''
@@ -173,8 +184,7 @@ class CSVExporter:
                     'Table_Name': table_name_for_csv,
                     'Table_Reference_SQL': table_ref_sql,
                     'Used_In_Workbook': used_status,
-                    'Is_Calculated': calculated_status,
-                    'Is_Parameter': parameter_status,
+                    'Type': field_type,
                     'Calculation_Formula': clean_formula
                 })
 
@@ -212,7 +222,31 @@ class CSVExporter:
                 parameter_fields = sum(1 for field in datasource_info.get('fields', []) if field.get('is_parameter', False))
                 f.write(f"Fields Used in Workbook: {used_fields}\n")
                 f.write(f"Calculated Fields: {calculated_fields}\n")
-                f.write(f"Parameter Fields: {parameter_fields}\n\n")
+                f.write(f"Parameter Fields: {parameter_fields}\n")
+                
+                # Add parameters section if any exist
+                if parameter_fields > 0:
+                    f.write(f"\nPARAMETERS TO RECREATE IN POWER BI:\n")
+                    f.write(f"----------------------------------\n")
+                    for field in datasource_info.get('fields', []):
+                        if field.get('is_parameter', False):
+                            param_name = field.get('name', 'Unknown')
+                            param_value = field.get('calculation_formula', '')
+                            param_type = field.get('datatype', 'Unknown')
+                            f.write(f"  📊 {param_name}:\n")
+                            f.write(f"     Type: {param_type}\n")
+                            if param_value:
+                                f.write(f"     Default Value: {param_value}\n")
+                            f.write(f"     Usage: Create as Power BI parameter\n\n")
+                
+                # Add hyper data information if available
+                if datasource_info.get('hyper_data'):
+                    hyper_tables = len(datasource_info['hyper_data'])
+                    total_rows = sum(table_info['row_count'] for table_info in datasource_info['hyper_data'].values())
+                    f.write(f"Hyper Data Tables: {hyper_tables}\n")
+                    f.write(f"Total Data Rows: {total_rows:,}\n")
+                
+                f.write(f"\n")
                 
                 # Connection details
                 if datasource_info.get('connections'):
@@ -245,6 +279,23 @@ class CSVExporter:
                     main_table = datasource_info['sql_info']['all_tables'][first_alias]['table_name']
                     clean_main_table = main_table.replace('[', '').replace(']', '').replace(' ', '_')
                     f.write(f"MAIN TABLE: {clean_main_table} (aliased as {first_alias})\n\n")
+                
+                # Hyper Data Tables section (if available)
+                if datasource_info.get('hyper_data'):
+                    f.write(f"HYPER DATA TABLES (Ready for Power BI Import):\n")
+                    f.write(f"--------------------------------------------\n")
+                    
+                    for table_key, table_info in datasource_info['hyper_data'].items():
+                        f.write(f"📊 {table_key}:\n")
+                        f.write(f"   Source: {table_info['source_file']}\n")
+                        f.write(f"   Table: {table_info['table_name']}\n")
+                        f.write(f"   Rows: {table_info['row_count']:,}\n")
+                        f.write(f"   Columns: {table_info['column_count']}\n")
+                        f.write(f"   Columns: {', '.join(str(col) for col in table_info['columns'])}\n")
+                        f.write(f"   Excel File: {table_key}.xlsx\n\n")
+                    
+                    f.write(f"💡 TIP: Import these Excel files directly into Power BI!\n")
+                    f.write(f"   No need to recreate SQL queries - you have the actual data.\n\n")
                 
                 # Join conditions with types
                 # Always initialize unique_relationships to avoid scope issues

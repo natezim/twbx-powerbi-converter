@@ -123,6 +123,16 @@ class TableauMigrator:
             # Extract calculated fields from workbook XML
             self.field_extractor.extract_calculated_fields_from_workbook(xml_metadata)
             
+            # Extract data from Hyper files (if any exist)
+            print("🔍 Looking for Hyper data files...")
+            hyper_data = self.field_extractor.extract_data_from_hyper_files(self.parser.twbx_path)
+            
+            # Check if Hyper API dependency is missing
+            if hyper_data.get("__missing_dependency__"):
+                print(f"   ⚠️ Hyper data extraction skipped: {hyper_data['__missing_dependency__']} not available")
+                print("   Install with: pip install tableauhyperapi")
+                hyper_data = {}  # Clear the marker
+            
             # Get dashboard and worksheet information
             dashboard_info = self.field_extractor.extract_dashboard_worksheet_info(self.xml_root)
             print(f"   Found {len(dashboard_info)} dashboards/worksheets")
@@ -156,6 +166,11 @@ class TableauMigrator:
                 }
                 ds_info['fields'].append(field_info)
             
+            # Add hyper data if available
+            if hyper_data:
+                ds_info['hyper_data'] = hyper_data
+                print(f"   📊 Found hyper data for {len(hyper_data)} tables")
+            
             ds_info['field_count'] = len(ds_info['fields'])
             ds_info['sql_info'] = sql_info
             ds_info['dashboard_info'] = dashboard_info
@@ -163,7 +178,7 @@ class TableauMigrator:
         
         return data_sources
     
-    def export_results(self, data_sources):
+    def export_results(self, data_sources, skip_hyper_data=False):
         """Export results as text setup guides and CSV field mapping."""
         # Ensure output directory exists
         ensure_directory_exists('output')
@@ -181,6 +196,30 @@ class TableauMigrator:
         # Only export dashboard usage for the first datasource to avoid duplicates
         if data_sources and data_sources[0].get('dashboard_info'):
             self.csv_exporter.export_dashboard_usage_csv('output', data_sources, data_sources[0]['dashboard_info'])
+        
+        # Export hyper data to Excel (if any exists and not skipped)
+        if not skip_hyper_data:
+            print("📊 Exporting Hyper data to Excel...")
+            for ds in data_sources:
+                if ds.get('hyper_data'):
+                    # Skip if Hyper API dependency is missing
+                    if ds['hyper_data'].get("__missing_dependency__"):
+                        print(f"   ⚠️ Skipping Hyper data export for {ds.get('caption', 'Unknown')}: {ds['hyper_data']['__missing_dependency__']} not available")
+                        continue
+                    
+                    # Create workbook-specific folder for hyper data
+                    workbook_name = ds.get('workbook_name', 'Unknown')
+                    if workbook_name is None:
+                        workbook_name = 'Unknown'
+                    safe_workbook = str(workbook_name).replace(' ', '_').replace('/', '_')
+                    safe_workbook = ''.join(c for c in safe_workbook if c.isalnum() or c in '_-')
+                    hyper_output_dir = os.path.join('output', safe_workbook)
+                    os.makedirs(hyper_output_dir, exist_ok=True)
+                    
+                    # Export hyper data to Excel
+                    self.field_extractor.export_hyper_data_to_excel(ds['hyper_data'], hyper_output_dir)
+        else:
+            print("📊 Skipping Hyper data export (regular analysis mode)")
 
 
 def main():

@@ -83,11 +83,11 @@ class FieldExtractor:
                             
                             # Get parent table
                             parent_name = record.find('parent-name')
-                            parent_table = parent_name.text.replace('[', '').replace(']', '') if parent_name is not None else 'Unknown'
+                            parent_table = str(parent_name.text).replace('[', '').replace(']', '') if parent_name is not None and parent_name.text is not None else 'Unknown'
                             
                             # Get remote name (original database field)
                             remote_name = record.find('remote-name')
-                            remote_field = remote_name.text if remote_name is not None else field_name
+                            remote_field = str(remote_name.text) if remote_name is not None and remote_name.text is not None else field_name
                             
                             # Update field metadata with rich information
                             if field_name in field_metadata:
@@ -536,6 +536,10 @@ class FieldExtractor:
                                 param_type = param_elem.get('param-domain-type', 'Unknown')
                                 param_value = param_elem.get('value', '')
                                 
+                                # Try to get parameter value from calculation if available
+                                if not param_value and hasattr(field_obj, 'calculation') and field_obj.calculation:
+                                    param_value = field_obj.calculation
+                                
                                 # Create or update parameter field entry
                                 if clean_caption in field_metadata:
                                     field_metadata[clean_caption].update({
@@ -651,3 +655,182 @@ class FieldExtractor:
                     field_info['calculation_formula'] = formula
         
         print(f"   Total calculation references resolved: {replaced_count}")
+
+    def extract_data_from_hyper_files(self, twbx_path):
+        """Extract actual data from any .hyper files found in the TWBX."""
+        try:
+            from tableauhyperapi import HyperProcess, Connection, CreateMode, Telemetry
+            import pandas as pd
+            from pathlib import Path
+            import os
+        except ImportError as e:
+            print(f"⚠️ Tableau Hyper API not available: {e}")
+            print("   Install with: pip install tableauhyperapi")
+            # Return a special marker to indicate missing dependency
+            return {"__missing_dependency__": "tableauhyperapi"}
+        
+        extracted_data = {}
+        
+        # Create a temporary directory to extract TWBX contents
+        import tempfile
+        import zipfile
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            try:
+                # Extract TWBX file (it's a ZIP file)
+                with zipfile.ZipFile(twbx_path, 'r') as zip_ref:
+                    zip_ref.extractall(temp_dir)
+                
+                # Look for .hyper files in the extracted TWBX
+                hyper_files = list(Path(temp_dir).glob('**/*.hyper'))
+                
+                if not hyper_files:
+                    print("   No .hyper files found in TWBX")
+                    return {}
+                
+                print(f"   Found {len(hyper_files)} .hyper files")
+                
+                for hyper_file in hyper_files:
+                    try:
+                        print(f"     Processing: {hyper_file.name}")
+                        
+                        with HyperProcess(telemetry=Telemetry.DO_NOT_SEND_USAGE_DATA_TO_TABLEAU) as hyper:
+                            with Connection(hyper.endpoint, str(hyper_file), CreateMode.NONE) as connection:
+                                
+                                # Get all tables in the hyper file
+                                table_names = connection.catalog.get_table_names('Extract')
+                                
+                                if not table_names:
+                                    print(f"       No tables found in {hyper_file.name}")
+                                    continue
+                                
+                                print(f"       Found {len(table_names)} tables")
+                                
+                                for table_name in table_names:
+                                    try:
+                                        print(f"         Processing table: {table_name}")
+                                        
+                                        # Get column schema first
+                                        schema_query = f'SELECT * FROM {table_name} LIMIT 1'
+                                        with connection.execute_query(schema_query) as schema_result:
+                                            # Clean column names by removing quotes and extra characters
+                                            columns = [str(col.name).replace('"', '').replace("'", "").strip() for col in schema_result.schema.columns]
+                                        
+                                        # Extract data using SQL
+                                        query = f'SELECT * FROM {table_name}'
+                                        with connection.execute_query(query) as result:
+                                            # Convert result to list of tuples
+                                            data = [tuple(row) for row in result]
+                                        
+                                        if not data:
+                                            print(f"         Table {table_name}: No data")
+                                            continue
+                                        
+                                        # Convert to pandas DataFrame
+                                        df = pd.DataFrame(data, columns=columns)
+                                        
+                                        # Create a clean table name for the filename
+                                        # Handle schema-qualified table names like "Extract"."Orders_ECFCA1FB690A41FE803BC071773BA862"
+                                        clean_table_name = str(table_name)
+                                        
+                                        # Remove quotes and extract just the table part after the last dot
+                                        clean_table_name = clean_table_name.replace('"', '').replace("'", "")
+                                        
+                                        # If it has a schema prefix (like "Extract"."TableName"), extract just the table part
+                                        if '.' in clean_table_name:
+                                            # Split by dot and take the last part (the actual table name)
+                                            table_parts = clean_table_name.split('.')
+                                            if len(table_parts) > 1:
+                                                # Remove the schema part and get just the table name
+                                                clean_table_name = table_parts[-1]
+                                        
+                                        # Remove common prefixes that Tableau adds to table names
+                                        prefixes_to_remove = ['Extract', 'Sample_', 'Sample - ']
+                                        for prefix in prefixes_to_remove:
+                                            if clean_table_name.startswith(prefix):
+                                                clean_table_name = clean_table_name[len(prefix):].strip()
+                                                break
+                                        
+                                        # Remove the hash part (everything after the last underscore that's followed by a long hex string)
+                                        # Pattern: TableName_Hash where Hash is a long hex string
+                                        if '_' in clean_table_name:
+                                            parts = clean_table_name.split('_')
+                                            # Check if the last part looks like a hash (long hex string)
+                                            if len(parts) > 1 and len(parts[-1]) > 20 and all(c in '0123456789ABCDEFabcdef' for c in parts[-1]):
+                                                # Remove the hash part, keep the meaningful table name
+                                                clean_table_name = '_'.join(parts[:-1])
+                                        
+                                        # Clean up special characters and make it safe for filenames
+                                        clean_table_name = clean_table_name.replace('\\', '_').replace('/', '_').replace(' ', '_')
+                                        # Remove any remaining special characters that aren't alphanumeric or underscore
+                                        clean_table_name = ''.join(c for c in clean_table_name if c.isalnum() or c == '_')
+                                        
+                                        # Use just the clean table name as the key
+                                        safe_key = clean_table_name
+                                        
+                                        extracted_data[safe_key] = {
+                                            'dataframe': df,
+                                            'row_count': len(df),
+                                            'column_count': len(columns),
+                                            'columns': columns,
+                                            'source_file': hyper_file.name,
+                                            'table_name': table_name,
+                                            'safe_key': safe_key
+                                        }
+                                        
+                                        print(f"         ✅ Extracted {len(df)} rows, {len(columns)} columns from {table_name}")
+                                        
+                                    except Exception as e:
+                                        print(f"         ⚠️ Error extracting table {table_name}: {e}")
+                                        continue
+                                        
+                    except Exception as e:
+                        print(f"     ⚠️ Could not process {hyper_file.name}: {e}")
+                        continue
+                
+                print(f"   Successfully extracted data from {len(extracted_data)} tables")
+                
+            except Exception as e:
+                print(f"   ⚠️ Error extracting TWBX contents: {e}")
+                return {}
+        
+        return extracted_data
+
+    def export_hyper_data_to_excel(self, extracted_data, output_dir):
+        """Export extracted hyper data to Excel files."""
+        if not extracted_data:
+            print("   No hyper data to export")
+            return []
+        
+        try:
+            import pandas as pd
+            import os
+        except ImportError as e:
+            print(f"⚠️ Pandas not available: {e}")
+            return []
+        
+        exported_files = []
+        
+        for table_key, table_info in extracted_data.items():
+            try:
+                df = table_info['dataframe']
+                # Use just the clean table name for the filename
+                safe_filename = f"{table_key}.xlsx"
+                excel_path = os.path.join(output_dir, safe_filename)
+                
+                # Export to Excel
+                df.to_excel(excel_path, index=False, engine='openpyxl')
+                exported_files.append(excel_path)
+                
+                print(f"     📊 Saved {table_info['row_count']} rows to: {safe_filename}")
+                
+            except Exception as e:
+                print(f"     ⚠️ Error exporting {table_key}: {e}")
+                continue
+        
+        if exported_files:
+            print(f"   ✅ Exported {len(exported_files)} Excel files")
+        else:
+            print("   ⚠️ No files were exported successfully")
+        
+        return exported_files
