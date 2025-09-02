@@ -1,0 +1,138 @@
+POWER BI SETUP GUIDE
+==================
+
+Data Source: Sample - Superstore
+Caption: 
+Fields Available: 36
+Fields Used in Workbook: 20
+Calculated Fields: 9
+Parameter Fields: 2
+
+PARAMETERS TO RECREATE IN POWER BI:
+----------------------------------
+  📊 Top Customers:
+     Type: integer
+     Default Value: 5
+     Usage: Create as Power BI parameter
+
+  📊 Profit Bin Size:
+     Type: integer
+     Default Value: 200
+     Usage: Create as Power BI parameter
+
+
+CONNECTION DETAILS:
+------------------
+Connection 1:
+  Server: None
+  Database: None
+  Username: None
+  Type: excel-direct
+  Port: None
+
+TABLES TO IMPORT:
+----------------
+  Orders$ as Orders
+  Extract.Orders_ECFCA1FB690A41FE803BC071773BA862 as Orders_ECFCA1FB690A41FE803BC071773BA862
+  People$ as People
+  Extract.People_D73023733B004CC1B3CB1ACF62F4A965 as People_D73023733B004CC1B3CB1ACF62F4A965
+  Returns$ as Returns
+  Extract.Returns_2AA0FE4D737A4F63970131D0E7480A03 as Returns_2AA0FE4D737A4F63970131D0E7480A03
+
+MAIN TABLE: Orders$ (aliased as Orders)
+
+No relationships found
+
+PARAMETERS:
+-----------
+Profit Bin Size (Parameter - integer):
+  200
+  --------------------------------------------------
+
+Top Customers (Parameter - integer):
+  5
+  --------------------------------------------------
+
+
+CALCULATED FIELDS:
+------------------
+Order Date (copy) (date, dimension):
+  [Order Date]
+  --------------------------------------------------
+
+Period (string, dimension):
+  // Calculate previous year and current year
+
+
+    IF DATEDIFF('month', DATETRUNC('month', [Order Date]), { FIXED : MAX([Order Date])}) <= 11 THEN 'CURRENT'
+ELSEIF DATEDIFF('month', DATETRUNC('month', [Order Date]), { FIXED : MAX([Order Date])}) >= 12
+   AND DATEDIFF('month', DATETRUNC('month', [Order Date]), { FIXED : MAX([Order Date])}) <= 23 THEN 'PREVIOUS'
+  ELSE 'NA'
+   END
+  --------------------------------------------------
+
+Period Label (string, dimension):
+  IF [Period] = 'PREVIOUS' THEN 'Prior Year'
+ELSEIF [Period] = 'CURRENT' THEN 'Most Recent Year'
+ELSE NULL
+END
+  --------------------------------------------------
+
+Profit (bin) (integer, dimension):
+  [Profit]
+  --------------------------------------------------
+
+Sales - % Difference (real, measure):
+  // % difference in sales
+
+
+(ZN(SUM([Sales])) - [Sales - Previous Value]) / ABS([Sales - Previous Value])
+  --------------------------------------------------
+
+Sales - % Difference - Down (real, measure):
+  // One calc to show if the % difference is going up (or no change)
+// Another to show if it is going down
+// One is always NULL
+// Show both on the card and color-code them each
+
+IF [Sales - % Difference] < 0 THEN [Sales - % Difference]
+ELSE NULL
+END
+  --------------------------------------------------
+
+Sales - % Difference - Up (real, measure):
+  // One calc to show if the % difference is going up (or no change)
+// Another to show if it is going down
+// One is always NULL
+// Show both on the card and color-code them each
+
+IF [Sales - % Difference] >= 0 THEN [Sales - % Difference]
+ELSE NULL
+END
+  --------------------------------------------------
+
+Sales - Previous Value (real, measure):
+  // Previous value
+
+LOOKUP(ZN(SUM([Sales])), -1)
+  --------------------------------------------------
+
+Sales for Tooltip (real, measure):
+  [Sales]
+  --------------------------------------------------
+
+
+SQL COLUMNS:
+
+-- Orders:
+  Orders.Order Date as 'Order Date',
+  Orders.Product Name as 'Product Name',
+  Orders.Region as Region,
+  Orders.Sales as Sales,
+  Orders.Segment as Segment,
+  Orders.Ship Mode as 'Ship Mode',
+  Orders.State/Province as State/Province,
+  Orders.Sub-Category as Sub-Category,
+
+-- People:
+  People.Regional Manager as 'Regional Manager',

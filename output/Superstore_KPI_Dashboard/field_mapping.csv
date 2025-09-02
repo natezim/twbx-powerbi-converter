@@ -1,0 +1,37 @@
+Original_Field_Name,Tableau_Field_Name,Data_Type,Table_Name,Table_Reference_SQL,Used_In_Workbook,Type,Calculation_Formula
+Category,Category,string,Orders,Orders.Category as Category,No,Column,
+City,City,string,Orders,Orders.City as City,No,Column,
+Country/Region,Country/Region,string,Orders,Orders.Country/Region as Country/Region,No,Column,
+Customer ID,Customer ID,string,Orders,Orders.Customer ID as Customer ID,No,Column,
+Customer Name,Customer Name,string,Orders,Orders.Customer Name as Customer Name,No,Column,
+Discount,Discount,real,Orders,Orders.Discount as Discount,No,Column,
+Order Date,Order Date,date,Orders,Orders.Order Date as Order Date,Yes,Column,
+Order ID,Order ID,string,Orders,Orders.Order ID as Order ID,No,Column,
+Postal Code,Postal Code,string,Orders,Orders.Postal Code as Postal Code,No,Column,
+Product ID,Product ID,string,Orders,Orders.Product ID as Product ID,No,Column,
+Product Name,Product Name,string,Orders,Orders.Product Name as Product Name,Yes,Column,
+Profit,Profit,real,Orders,Orders.Profit as Profit,No,Column,
+Quantity,Quantity,integer,Orders,Orders.Quantity as Quantity,No,Column,
+Region,Region,string,Orders,Orders.Region as Region,Yes,Column,
+Row ID,Row ID,integer,Orders,Orders.Row ID as Row ID,No,Column,
+Sales,Sales,real,Orders,Orders.Sales as Sales,Yes,Column,
+Segment,Segment,string,Orders,Orders.Segment as Segment,Yes,Column,
+Ship Date,Ship Date,date,Orders,Orders.Ship Date as Ship Date,No,Column,
+Ship Mode,Ship Mode,string,Orders,Orders.Ship Mode as Ship Mode,Yes,Column,
+State/Province,State/Province,string,Orders,Orders.State/Province as State/Province,Yes,Column,
+Sub-Category,Sub-Category,string,Orders,Orders.Sub-Category as Sub-Category,Yes,Column,
+Region,Region (People),string,People,People.Region as Region (People),No,Column,
+Regional Manager,Regional Manager,string,People,People.Regional Manager as Regional Manager,Yes,Column,
+Order ID,Order ID (Returns),string,Returns,Returns.Order ID as Order ID (Returns),No,Column,
+Returned,Returned,string,Returns,Returns.Returned as Returned,No,Column,
+,Top Customers,integer,Workbook,PARAMETER: Top Customers = 5,Yes,Parameter,5
+,Profit Bin Size,integer,Workbook,PARAMETER: Profit Bin Size = 200,Yes,Parameter,200
+Sales - % Difference - Down,Sales - % Difference - Down,real,Workbook,CALCULATED: Sales - % Difference - Down,Yes,Calculated Field,// One calc to show if the % difference is going up (or no change)  // Another to show if it is going down  // One is always NULL  // Show both on the card and color-code them each    IF [Sales - % Difference] < 0 THEN [Sales - % Difference]  ELSE NULL  END
+Sales for Tooltip,Sales for Tooltip,real,Workbook,CALCULATED: Sales for Tooltip,Yes,Calculated Field,[Sales]
+Period,Period,string,Workbook,CALCULATED: Period,Yes,Calculated Field,"// Calculate previous year and current year          IF DATEDIFF('month', DATETRUNC('month', [Order Date]), { FIXED : MAX([Order Date])}) <= 11 THEN 'CURRENT'  ELSEIF DATEDIFF('month', DATETRUNC('month', [Order Date]), { FIXED : MAX([Order Date])}) >= 12     AND DATEDIFF('month', DATETRUNC('month', [Order Date]), { FIXED : MAX([Order Date])}) <= 23 THEN 'PREVIOUS'    ELSE 'NA'     END"
+Sales - % Difference,Sales - % Difference,real,Workbook,CALCULATED: Sales - % Difference,Yes,Calculated Field,// % difference in sales      (ZN(SUM([Sales])) - [Sales - Previous Value]) / ABS([Sales - Previous Value])
+Sales - % Difference - Up,Sales - % Difference - Up,real,Workbook,CALCULATED: Sales - % Difference - Up,Yes,Calculated Field,// One calc to show if the % difference is going up (or no change)  // Another to show if it is going down  // One is always NULL  // Show both on the card and color-code them each    IF [Sales - % Difference] >= 0 THEN [Sales - % Difference]  ELSE NULL  END
+Sales - Previous Value,Sales - Previous Value,real,Workbook,CALCULATED: Sales - Previous Value,Yes,Calculated Field,"// Previous value    LOOKUP(ZN(SUM([Sales])), -1)"
+Period Label,Period Label,string,Workbook,CALCULATED: Period Label,Yes,Calculated Field,IF [Period] = 'PREVIOUS' THEN 'Prior Year'  ELSEIF [Period] = 'CURRENT' THEN 'Most Recent Year'  ELSE NULL  END
+Order Date (copy),Order Date (copy),date,Workbook,CALCULATED: Order Date (copy),Yes,Calculated Field,[Order Date]
+Profit (bin),Profit (bin),integer,Workbook,CALCULATED: Profit (bin),Yes,Calculated Field,[Profit]

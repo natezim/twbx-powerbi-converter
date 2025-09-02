@@ -1,0 +1,68 @@
+POWER BI SETUP GUIDE
+==================
+
+Data Source: federated.14u9jyo1x4rfq40zzuj6c1nmag30
+Caption: nfl_teams (postgres)
+Fields Available: 153
+Fields Used in Workbook: 14
+Calculated Fields: 3
+Parameter Fields: 0
+
+CONNECTION DETAILS:
+------------------
+Connection 1:
+  Server: aws-0-us-east-1.pooler.supabase.com
+  Database: postgres
+  Username: postgres.wlmdmpgnmadyuvsiztyx
+  Type: postgres
+  Port: 5432
+
+TABLES TO IMPORT:
+----------------
+  props_teams as Away
+  nfl_teams as Away Teams
+  props_teams as Home
+  nfl_teams as Home Teams
+  nfl_dimers_lines
+
+MAIN TABLE: nfl_dimers_lines (aliased as nfl_dimers_lines)
+
+CREATE THESE RELATIONSHIPS IN POWER BI MODEL VIEW:
+------------------------------------------------
+1. LEFT JOIN props_teams AS Home ON props_teams.abbr = nfl_teams AS "Home Teams".
+2. LEFT JOIN nfl_dimers_lines AS nfl_dimers_lines ON nfl_dimers_lines.away_team = props_teams AS "Home Teams".
+3. LEFT JOIN nfl_dimers_lines AS nfl_dimers_lines ON nfl_dimers_lines.home_team = props_teams AS "Home Teams".
+4. LEFT JOIN props_teams AS Away ON props_teams.abbr = nfl_teams AS "Away Teams".
+
+CALCULATED FIELDS:
+------------------
+index (integer, measure):
+  INDEX()
+  --------------------------------------------------
+
+random calc (integer, measure):
+  if 1 = 1 then 2 END
+  --------------------------------------------------
+
+
+SQL COLUMNS:
+
+-- Away Teams:
+  "Away Teams".team_logo_squared as 'team_logo_squared (nfl_teams)',
+
+-- Home:
+  Home.full_name as full_name,
+
+-- Home Teams:
+  "Home Teams".team_division as team_division,
+  "Home Teams".team_logo_squared as team_logo_squared,
+
+-- nfl_dimers_lines:
+  nfl_dimers_lines.away_team as away_team,
+  nfl_dimers_lines.date as date,
+  nfl_dimers_lines.game_id as game_id,
+  nfl_dimers_lines.home_win_pct as home_win_pct,
+  nfl_dimers_lines.pred_away_score as pred_away_score,
+  nfl_dimers_lines.pred_home_score as pred_home_score,
+  nfl_dimers_lines.pred_margin as pred_margin,
+  nfl_dimers_lines.venue as venue,

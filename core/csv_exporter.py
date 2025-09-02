@@ -110,9 +110,18 @@ class CSVExporter:
                 # Clean up field names for better readability
                 original_name = field.get('remote_name', '') or ''
                 original_name = original_name.strip() if original_name else ''
-                tableau_name = field.get('name', '') or ''
-                tableau_name = tableau_name.strip() if tableau_name else ''
+                
+                # For tableau_name, prioritize alias/caption over internal name for calculated fields
                 is_calculated = field.get('is_calculated', False)
+                if is_calculated:
+                    # For calculated fields, prefer caption or api_caption over the internal name
+                    tableau_name = (field.get('caption') or 
+                                  field.get('api_caption') or 
+                                  field.get('name', ''))
+                else:
+                    # For regular fields, use the standard name
+                    tableau_name = field.get('name', '') or ''
+                tableau_name = tableau_name.strip() if tableau_name else ''
                 is_parameter = field.get('is_parameter', False)
                 calculation_formula = field.get('calculation_formula', '') or ''
                 
@@ -525,7 +534,15 @@ class CSVExporter:
                         
                         for field in sorted_fields:
                             original_name = field.get('remote_name', '').strip()
-                            tableau_name = field.get('name', '').strip()
+                            
+                            # For tableau_name, prioritize alias/caption for calculated fields
+                            is_calculated = field.get('is_calculated', False)
+                            if is_calculated:
+                                tableau_name = (field.get('caption') or 
+                                              field.get('api_caption') or 
+                                              field.get('name', '')).strip()
+                            else:
+                                tableau_name = field.get('name', '').strip()
                             
                             # Format as 'Table.field_name as tableau_name'
                             # Quote table reference if it has spaces

@@ -149,7 +149,7 @@ class SQLGenerator:
         return clean_ref
     
     def extract_sql_from_xml(self, datasource_name):
-        """Extract SQL - with BigQuery support."""
+        """Extract SQL - with connection-type-aware processing."""
         sql_queries = []
         
         if not self.xml_root:
@@ -159,87 +159,197 @@ class SQLGenerator:
         for ds in self.xml_root.findall('.//datasource'):
             if ds.get('name') == datasource_name:
                 
-                # Method 1: Extract custom SQL queries from relation[@type="text"] elements
-                for relation in ds.findall('.//relation[@type="text"]'):
-                    if relation.text and relation.text.strip():
-                        connection_name = relation.get('connection', '')
-                        query_name = relation.get('name', 'Custom Query')
-                        
-                        # Check if this is a BigQuery connection
-                        is_bigquery = 'bigquery' in connection_name.lower()
-                        query_type = 'BigQuery Custom SQL' if is_bigquery else 'Custom SQL'
-                        
+                # STEP 1: Identify all connection types in this datasource
+                connection_types = {}
+                
+                # Check named-connections for connection types
+                for named_conn in ds.findall('.//named-connection'):
+                    conn_name = named_conn.get('name', '')
+                    for conn in named_conn.findall('.//connection[@class]'):
+                        conn_class = conn.get('class', '')
+                        connection_types[conn_name] = conn_class
+                        print(f"      Found connection: {conn_name} -> {conn_class}")
+                
+                # Check direct connections
+                for conn in ds.findall('.//connection[@class]'):
+                    conn_class = conn.get('class', '')
+                    if conn_class not in connection_types.values():
+                        connection_types['direct'] = conn_class
+                        print(f"      Found direct connection: {conn_class}")
+                
+                # STEP 2: Process all relation elements based on their connection type
+                for relation in ds.findall('.//relation'):
+                    relation_type = relation.get('type', '')
+                    connection_name = relation.get('connection', '')
+                    query_name = relation.get('name', 'Query')
+                    table_name = relation.get('table', '')
+                    
+                    # Determine the connection class for this relation
+                    conn_class = connection_types.get(connection_name, 'unknown')
+                    
+                    print(f"      Processing relation: {query_name} (type={relation_type}, conn={connection_name}, class={conn_class})")
+                    
+                    # Process based on relation type and connection class
+                    if relation_type == 'text' and relation.text and relation.text.strip():
+                        # This is custom SQL
+                        sql_type = self._get_sql_type_for_connection(conn_class, 'Custom SQL')
                         sql_queries.append({
                             'name': query_name,
                             'sql': relation.text.strip(),
-                            'type': query_type,
-                            'connection': connection_name
+                            'type': sql_type,
+                            'connection': connection_name,
+                            'connection_class': conn_class
                         })
-                
-                # Method 2: Extract BigQuery connection info from named-connections
-                for named_conn in ds.findall('.//named-connection'):
-                    bg_conn = named_conn.find('.//connection[@class="bigquery"]')
-                    if bg_conn is not None:
-                        # Extract BigQuery project and schema info
-                        project = bg_conn.get('project', '') or bg_conn.get('CATALOG', '') or bg_conn.get('EXECCATALOG', '')
-                        schema = bg_conn.get('schema', '')
-                        connection_name = named_conn.get('name', '')
-                        caption = named_conn.get('caption', 'BigQuery Connection')
                         
-                        if project:
-                            connection_info = f'-- BigQuery Connection: {caption}\n'
-                            connection_info += f'-- Project: {project}\n'
-                            if schema:
-                                connection_info += f'-- Schema: {schema}\n'
-                            connection_info += f'-- Connection ID: {connection_name}\n'
-                            connection_info += '-- Use BigQuery connector in Power BI'
-                            
+                    elif relation_type == 'join':
+                        # This is a join relation
+                        join_info = self._extract_join_from_relation(relation, conn_class)
+                        if join_info:
+                            sql_type = self._get_sql_type_for_connection(conn_class, 'Join Info')
                             sql_queries.append({
-                                'name': f'BigQuery Connection: {caption}',
-                                'sql': connection_info,
-                                'type': 'BigQuery Connection Info',
+                                'name': f'{query_name} Join',
+                                'sql': join_info,
+                                'type': sql_type,
                                 'connection': connection_name,
-                                'project': project,
-                                'schema': schema
+                                'connection_class': conn_class
                             })
-                
-                # Method 3: Extract join information for BigQuery datasources
-                if 'bigquery' in ds.get('caption', '').lower():
-                    join_info = self.extract_bigquery_joins(ds)
-                    if join_info:
+                            
+                    elif table_name:
+                        # This is a table reference
+                        table_sql = self._generate_table_sql(table_name, conn_class)
+                        sql_type = self._get_sql_type_for_connection(conn_class, 'Table Reference')
                         sql_queries.append({
-                            'name': 'BigQuery Join Information',
-                            'sql': join_info,
-                            'type': 'BigQuery Join Info'
+                            'name': f'Table: {table_name}',
+                            'sql': table_sql,
+                            'type': sql_type,
+                            'connection': connection_name,
+                            'connection_class': conn_class
                         })
                 
-                # Method 4: Look for relation with BigQuery table references
-                for connection in ds.findall('.//connection[@class="bigquery"]'):
-                    for relation in connection.findall('.//relation'):
-                        table_ref = relation.get('table', '')
-                        if table_ref:
-                            # BigQuery table format: project.dataset.table
+                # STEP 3: Extract connection information for documentation
+                for named_conn in ds.findall('.//named-connection'):
+                    conn_name = named_conn.get('name', '')
+                    caption = named_conn.get('caption', 'Connection')
+                    
+                    for conn in named_conn.findall('.//connection[@class]'):
+                        conn_class = conn.get('class', '')
+                        conn_info = self._extract_connection_info(conn, conn_class, caption)
+                        if conn_info:
+                            sql_type = self._get_sql_type_for_connection(conn_class, 'Connection Info')
                             sql_queries.append({
-                                'name': f'BigQuery Table: {table_ref}',
-                                'sql': f'SELECT * FROM `{table_ref}`;',
-                                'type': 'BigQuery Table Reference'
+                                'name': f'{caption} Connection',
+                                'sql': conn_info,
+                                'type': sql_type,
+                                'connection': conn_name,
+                                'connection_class': conn_class
                             })
-                
-                # Method 5: Look for metadata-record with BigQuery SQL
-                for connection in ds.findall('.//connection[@class="bigquery"]'):
-                    for metadata in connection.findall('.//metadata-record'):
-                        if metadata.get('class') == 'relation':
-                            local_name = metadata.find('local-name')
-                            remote_name = metadata.find('remote-name')
-                            if remote_name is not None and remote_name.text:
-                                if '.' in remote_name.text:  # BigQuery format
-                                    sql_queries.append({
-                                        'name': f'BigQuery Dataset: {local_name.text if local_name is not None else "Unknown"}',
-                                        'sql': f'SELECT * FROM `{remote_name.text}`;',
-                                        'type': 'BigQuery Dataset Reference'
-                                    })
         
         return sql_queries
+    
+    def _get_sql_type_for_connection(self, conn_class, base_type):
+        """Get the appropriate SQL type based on connection class."""
+        if conn_class == 'bigquery':
+            return f'BigQuery {base_type}'
+        elif conn_class == 'postgres':
+            return f'PostgreSQL {base_type}'
+        elif conn_class == 'sqlserver':
+            return f'SQL Server {base_type}'
+        elif conn_class == 'mysql':
+            return f'MySQL {base_type}'
+        elif conn_class == 'oracle':
+            return f'Oracle {base_type}'
+        elif conn_class == 'snowflake':
+            return f'Snowflake {base_type}'
+        else:
+            return f'{conn_class.title()} {base_type}' if conn_class != 'unknown' else base_type
+    
+    def _extract_join_from_relation(self, relation, conn_class):
+        """Extract join information from a join relation."""
+        join_info = []
+        join_type = relation.get('join', 'inner')
+        join_info.append(f"-- {join_type.upper()} JOIN detected")
+        
+        # Extract join conditions
+        for clause in relation.findall('.//clause[@type="join"]'):
+            for expr in clause.findall('.//expression[@op="="]'):
+                nested_exprs = expr.findall('.//expression[@op]')
+                if len(nested_exprs) >= 2:
+                    left_field = nested_exprs[0].get('op', '')
+                    right_field = nested_exprs[1].get('op', '')
+                    
+                    if left_field and right_field:
+                        left_clean = self.clean_field_reference(left_field)
+                        right_clean = self.clean_field_reference(right_field)
+                        join_condition = f"-- JOIN ON: {left_clean} = {right_clean}"
+                        join_info.append(join_condition)
+        
+        return '\n'.join(join_info) if join_info else None
+    
+    def _generate_table_sql(self, table_name, conn_class):
+        """Generate appropriate SQL for table reference based on connection class."""
+        if conn_class == 'bigquery':
+            # BigQuery uses backticks for table names
+            return f'SELECT * FROM `{table_name}`;'
+        elif conn_class in ['postgres', 'mysql']:
+            # PostgreSQL and MySQL can use double quotes for identifiers
+            return f'SELECT * FROM "{table_name}";'
+        elif conn_class == 'sqlserver':
+            # SQL Server uses square brackets
+            return f'SELECT * FROM [{table_name}];'
+        else:
+            # Default format
+            return f'SELECT * FROM {table_name};'
+    
+    def _extract_connection_info(self, conn, conn_class, caption):
+        """Extract connection information based on connection class."""
+        if conn_class == 'bigquery':
+            project = conn.get('project', '') or conn.get('CATALOG', '') or conn.get('EXECCATALOG', '')
+            schema = conn.get('schema', '')
+            
+            if project:
+                info = f'-- BigQuery Connection: {caption}\n'
+                info += f'-- Project: {project}\n'
+                if schema:
+                    info += f'-- Schema: {schema}\n'
+                info += '-- Use BigQuery connector in Power BI'
+                return info
+                
+        elif conn_class == 'postgres':
+            server = conn.get('server', '')
+            dbname = conn.get('dbname', '')
+            port = conn.get('port', '5432')
+            
+            if server:
+                info = f'-- PostgreSQL Connection: {caption}\n'
+                info += f'-- Server: {server}\n'
+                info += f'-- Database: {dbname}\n'
+                info += f'-- Port: {port}\n'
+                info += '-- Use PostgreSQL connector in Power BI'
+                return info
+                
+        elif conn_class == 'sqlserver':
+            server = conn.get('server', '')
+            dbname = conn.get('dbname', '')
+            
+            if server:
+                info = f'-- SQL Server Connection: {caption}\n'
+                info += f'-- Server: {server}\n'
+                info += f'-- Database: {dbname}\n'
+                info += '-- Use SQL Server connector in Power BI'
+                return info
+        
+        # Default connection info
+        server = conn.get('server', '')
+        dbname = conn.get('dbname', '')
+        if server or dbname:
+            info = f'-- {conn_class.title()} Connection: {caption}\n'
+            if server:
+                info += f'-- Server: {server}\n'
+            if dbname:
+                info += f'-- Database: {dbname}\n'
+            return info
+        
+        return None
     
     def extract_bigquery_joins(self, datasource_xml):
         """Extract join information specifically for BigQuery datasources."""

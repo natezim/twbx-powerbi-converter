@@ -136,7 +136,49 @@ class TableauMigrator:
             xml_metadata = self.field_extractor.extract_field_metadata(datasource.name)
             print(f"   Found {len(xml_metadata)} fields with rich metadata from XML")
             
-            # Extract calculated fields from workbook XML
+            # ALSO extract fields using Document API for enhanced information
+            print(f"   Document API fields and calculations:")
+            for field_name, field_obj in datasource.fields.items():
+                # Enhance XML metadata with Document API data
+                if field_name in xml_metadata:
+                    xml_metadata[field_name].update({
+                        'api_caption': field_obj.caption,
+                        'api_role': field_obj.role,  # Dimension/Measure
+                        'api_type': field_obj.type,  # quantitative/ordinal/nominal
+                        'api_calculation': field_obj.calculation,
+                        'api_worksheets': field_obj.worksheets,
+                        'api_description': field_obj.description,
+                        'api_aggregation': field_obj.default_aggregation
+                    })
+                else:
+                    # Add new field found only in Document API
+                    xml_metadata[field_name] = {
+                        'name': field_obj.name or field_name,
+                        'caption': field_obj.caption,
+                        'datatype': field_obj.datatype,
+                        'role': field_obj.role,
+                        'type': field_obj.type,
+                        'calculation_formula': field_obj.calculation,
+                        'is_calculated': field_obj.calculation is not None,
+                        'worksheets': field_obj.worksheets,
+                        'description': field_obj.description,
+                        'default_aggregation': field_obj.default_aggregation,
+                        'source': 'document_api'
+                    }
+                
+                # Log calculated fields specifically
+                if field_obj.calculation:
+                    print(f"      - {field_name}: {field_obj.caption} (CALCULATED)")
+                    print(f"        Formula: {field_obj.calculation[:80]}...")
+                elif field_obj.role == 'measure':
+                    print(f"      - {field_name}: {field_obj.caption} (MEASURE)")
+                elif field_obj.role == 'dimension':
+                    print(f"      - {field_name}: {field_obj.caption} (DIMENSION)")
+            
+            print(f"   Total enhanced fields: {len(xml_metadata)}")
+            print(f"   Calculated fields via Document API: {len(datasource.calculations)}")
+            
+            # Extract calculated fields from workbook XML (legacy method)
             self.field_extractor.extract_calculated_fields_from_workbook(xml_metadata)
             
             # Extract data from Hyper files (if any exist and not skipped)
@@ -160,10 +202,57 @@ class TableauMigrator:
             # Get SQL queries from XML
             datasource_xml = self.parser.find_datasource_xml(datasource.name)
             if datasource_xml:
+                # Use the original method for standard SQL extraction
                 sql_info = self.sql_generator.extract_sql_from_tableau_xml(datasource_xml)
                 print(f"   Found {len(sql_info['custom_sql'])} custom SQL queries")
                 print(f"   Found {len(sql_info['table_references'])} table references")
                 print(f"   Found {len(sql_info['relationships'])} relationships")
+                
+                # ALSO use the new connection-type-aware extraction
+                print(f"   DEBUG: Checking all connection types for datasource: {datasource.name}")
+                
+                # First, show connection information using Tableau Document API
+                print(f"   Connections found via Document API:")
+                for conn in datasource.connections:
+                    print(f"      - {conn.dbclass}: {conn.server} / {conn.dbname}")
+                    if hasattr(conn, 'initial_sql') and conn.initial_sql:
+                        print(f"        Initial SQL: {conn.initial_sql[:50]}...")
+                
+                # Also check custom SQL via Document API
+                if hasattr(datasource, '_get_custom_sql'):
+                    custom_relations = datasource._get_custom_sql()
+                    print(f"   Custom SQL relations found via Document API: {len(custom_relations)}")
+                    for rel in custom_relations:
+                        rel_type = rel.get('type', '')
+                        rel_name = rel.get('name', 'Unknown')
+                        connection = rel.get('connection', '')
+                        if rel_type == 'text' and rel.text:
+                            print(f"      - {rel_name} (type={rel_type}, conn={connection})")
+                            print(f"        SQL: {rel.text.strip()[:50]}...")
+                            # Add this to our SQL info as well
+                            sql_info['custom_sql'].append({
+                                'name': rel_name,
+                                'sql': rel.text.strip(),
+                                'connection': connection,
+                                'type': f'Document API Custom SQL'
+                            })
+                
+                # Then use our enhanced XML extraction
+                enhanced_sql = self.sql_generator.extract_sql_from_xml(datasource.name)
+                if enhanced_sql:
+                    print(f"   ✅ Found {len(enhanced_sql)} SQL queries/connections via XML extraction")
+                    for sql_query in enhanced_sql:
+                        print(f"      - {sql_query['name']} ({sql_query['type']})")
+                    # Add enhanced queries to the standard SQL info structure
+                    for sql_query in enhanced_sql:
+                        sql_info['custom_sql'].append({
+                            'name': sql_query['name'],
+                            'sql': sql_query['sql'],
+                            'connection': sql_query.get('connection', ''),
+                            'type': sql_query['type']
+                        })
+                else:
+                    print(f"   ❌ No enhanced SQL found for datasource: {datasource.name}")
             else:
                 sql_info = {'custom_sql': [], 'table_references': [], 'relationships': []}
             
