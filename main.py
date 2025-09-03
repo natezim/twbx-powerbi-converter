@@ -126,6 +126,25 @@ class TableauMigrator:
                 if hasattr(connection, 'region') and getattr(connection, 'region'):
                     conn_info['region'] = getattr(connection, 'region', '')
                 
+                # For BigQuery, if Document API doesn't provide details, extract from XML
+                if conn_info['dbclass'] == 'bigquery' and (not conn_info.get('project') or not conn_info['server']):
+                    # Try to get BigQuery details from XML
+                    xml_datasource = self.parser.find_datasource_xml(datasource.name)
+                    if xml_datasource:
+                        # Look for BigQuery connection in XML
+                        for xml_conn in xml_datasource.findall('.//connection[@class="bigquery"]'):
+                            if xml_conn.get('project'):
+                                conn_info['project'] = xml_conn.get('project', '')
+                                conn_info['server'] = xml_conn.get('project', '')  # Use project as server for display
+                            if xml_conn.get('schema'):
+                                conn_info['dataset'] = xml_conn.get('schema', '')
+                                conn_info['dbname'] = xml_conn.get('schema', '')  # Use schema as dbname for display
+                            if xml_conn.get('CATALOG'):
+                                conn_info['project'] = conn_info.get('project') or xml_conn.get('CATALOG', '')
+                                conn_info['server'] = conn_info.get('server') or xml_conn.get('CATALOG', '')
+                            if xml_conn.get('username'):
+                                conn_info['username'] = xml_conn.get('username', '')
+                
                 # For BigQuery, use project as the primary identifier if dbname is empty
                 if conn_info['dbclass'] == 'bigquery' and not conn_info['dbname'] and conn_info.get('project'):
                     conn_info['dbname'] = conn_info['project']
@@ -229,30 +248,124 @@ class TableauMigrator:
                         if rel_type == 'text' and rel.text:
                             print(f"      - {rel_name} (type={rel_type}, conn={connection})")
                             print(f"        SQL: {rel.text.strip()[:50]}...")
-                            # Add this to our SQL info as well
-                            sql_info['custom_sql'].append({
+                            # Add this to our SQL info as well (with deduplication)
+                            new_sql = {
                                 'name': rel_name,
                                 'sql': rel.text.strip(),
                                 'connection': connection,
                                 'type': f'Document API Custom SQL'
-                            })
+                            }
+                            # Check if this SQL already exists (dedupe by SQL content)
+                            sql_text = new_sql.get('sql', '').strip()
+                            existing_sqls = [existing.get('sql', '').strip() for existing in sql_info['custom_sql']]
+                            if sql_text not in existing_sqls:
+                                sql_info['custom_sql'].append(new_sql)
                 
-                # Then use our enhanced XML extraction
-                enhanced_sql = self.sql_generator.extract_sql_from_xml(datasource.name)
-                if enhanced_sql:
-                    print(f"   ✅ Found {len(enhanced_sql)} SQL queries/connections via XML extraction")
-                    for sql_query in enhanced_sql:
-                        print(f"      - {sql_query['name']} ({sql_query['type']})")
-                    # Add enhanced queries to the standard SQL info structure
-                    for sql_query in enhanced_sql:
-                        sql_info['custom_sql'].append({
-                            'name': sql_query['name'],
-                            'sql': sql_query['sql'],
-                            'connection': sql_query.get('connection', ''),
-                            'type': sql_query['type']
+                # Use Tableau Document API for reliable SQL extraction
+                print(f"   📋 Document API SQL Extraction:")
+                api_sql_queries = []
+                
+                # Extract custom SQL using Document API
+                if hasattr(datasource, '_get_custom_sql'):
+                    custom_relations = datasource._get_custom_sql()
+                    text_relations = [r for r in custom_relations if r.get('type') == 'text' and r.text and r.text.strip()]
+                    
+                    print(f"      Found {len(text_relations)} custom SQL queries via Document API")
+                    for rel in text_relations:
+                        rel_name = rel.get('name', 'Custom Query')
+                        connection_id = rel.get('connection', '')
+                        sql_text = rel.text.strip()
+                        
+                        # Determine database type from connection
+                        db_type = 'Unknown'
+                        for conn in datasource.connections:
+                            if connection_id and (any(part in connection_id.lower() for part in [conn.dbclass, 'bigquery', 'postgres', 'snowflake'])):
+                                db_type = conn.dbclass
+                                break
+                        
+                        print(f"         - {rel_name} ({db_type})")
+                        api_sql_queries.append({
+                            'name': rel_name,
+                            'sql': sql_text,
+                            'connection': connection_id,
+                            'type': f'{db_type.title()} Custom SQL via Document API'
                         })
+                
+                # Extract initial SQL from connections
+                for conn in datasource.connections:
+                    if hasattr(conn, 'initial_sql') and conn.initial_sql and conn.initial_sql.strip():
+                        print(f"         - {conn.dbclass} Initial SQL")
+                        api_sql_queries.append({
+                            'name': f'{conn.dbclass} Initial SQL',
+                            'sql': conn.initial_sql.strip(),
+                            'connection': f'{conn.server}/{conn.dbname}',
+                            'type': f'{conn.dbclass.title()} Initial SQL via Document API'
+                        })
+                
+                # Add API queries to standard SQL info structure (with deduplication)
+                for sql_query in api_sql_queries:
+                    # Check if this SQL already exists (dedupe by SQL content)
+                    sql_text = sql_query.get('sql', '').strip()
+                    existing_sqls = [existing.get('sql', '').strip() for existing in sql_info['custom_sql']]
+                    if sql_text not in existing_sqls:
+                        sql_info['custom_sql'].append(sql_query)
+                
+                if api_sql_queries:
+                    print(f"   ✅ Found {len(api_sql_queries)} SQL queries via Document API")
                 else:
-                    print(f"   ❌ No enhanced SQL found for datasource: {datasource.name}")
+                    print(f"   ℹ️ No custom SQL found - extracting direct table connections")
+                    
+                    # Extract table connections when no custom SQL exists
+                    if hasattr(datasource, '_get_custom_sql'):
+                        all_relations = datasource._get_custom_sql()
+                        table_relations = [r for r in all_relations if r.get('type') == 'table' and r.get('table')]
+                        
+                        print(f"      Found {len(table_relations)} direct table connections")
+                        for rel in table_relations:
+                            table_name = rel.get('table', '')
+                            connection_id = rel.get('connection', '')
+                            
+                            # Skip extract tables - these are Tableau-generated
+                            if 'extract' in table_name.lower():
+                                continue
+                            
+                            # Determine database type from connection
+                            db_type = 'Unknown'
+                            server_info = ''
+                            for conn in datasource.connections:
+                                if connection_id and (any(part in connection_id.lower() for part in [conn.dbclass, 'bigquery', 'postgres', 'snowflake'])):
+                                    db_type = conn.dbclass
+                                    server_info = f"{conn.server}/{conn.dbname}"
+                                    break
+                            
+                            # Generate appropriate SQL for the table reference
+                            if db_type == 'bigquery':
+                                generated_sql = f'SELECT * FROM `{table_name}`;'
+                            elif db_type in ['postgres', 'mysql']:
+                                generated_sql = f'SELECT * FROM "{table_name}";'
+                            elif db_type == 'sqlserver':
+                                generated_sql = f'SELECT * FROM [{table_name}];'
+                            else:
+                                generated_sql = f'SELECT * FROM {table_name};'
+                            
+                            print(f"         - Table: {table_name} ({db_type})")
+                            api_sql_queries.append({
+                                'name': f'Table: {table_name}',
+                                'sql': f'-- Direct table connection\n-- Connect to: {server_info}\n-- Table: {table_name}\n\n{generated_sql}',
+                                'connection': connection_id,
+                                'type': f'{db_type.title()} Table Connection via Document API'
+                            })
+                    
+                    # Add table connection info to SQL info structure (with deduplication)
+                    for sql_query in api_sql_queries:
+                        # Check if this SQL already exists (dedupe by SQL content)
+                        sql_text = sql_query.get('sql', '').strip()
+                        existing_sqls = [existing.get('sql', '').strip() for existing in sql_info['custom_sql']]
+                        if sql_text not in existing_sqls:
+                            sql_info['custom_sql'].append(sql_query)
+                    
+                    if api_sql_queries:
+                        print(f"   ✅ Found {len(api_sql_queries)} table connections via Document API")
             else:
                 sql_info = {'custom_sql': [], 'table_references': [], 'relationships': []}
             

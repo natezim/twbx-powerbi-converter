@@ -19,18 +19,27 @@ class TableauParser:
         self.xml_root = None
     
     def extract_and_parse(self):
-        """Extract TWBX and parse using official Tableau API + XML."""
+        """Extract TWBX/TWB and parse using official Tableau API + XML."""
         try:
             # Use official Tableau API for workbook access
             self.workbook = Workbook(self.twbx_path)
             
             # Also extract XML for rich metadata
-            with zipfile.ZipFile(self.twbx_path, 'r') as z:
-                # Find the .twb file
-                twb_files = [f for f in z.namelist() if f.endswith('.twb')]
-                if twb_files:
-                    twb_content = z.read(twb_files[0]).decode('utf-8')
+            if self.twbx_path.lower().endswith('.twbx'):
+                # TWBX file - extract XML from zip
+                with zipfile.ZipFile(self.twbx_path, 'r') as z:
+                    # Find the .twb file
+                    twb_files = [f for f in z.namelist() if f.endswith('.twb')]
+                    if twb_files:
+                        twb_content = z.read(twb_files[0]).decode('utf-8')
+                        self.xml_root = ET.fromstring(twb_content)
+            elif self.twbx_path.lower().endswith('.twb'):
+                # TWB file - read XML directly
+                with open(self.twbx_path, 'r', encoding='utf-8') as f:
+                    twb_content = f.read()
                     self.xml_root = ET.fromstring(twb_content)
+            else:
+                raise ValueError(f"Unsupported file type: {self.twbx_path}")
             
             return True
         except Exception as e:

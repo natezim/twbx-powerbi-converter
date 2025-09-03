@@ -169,6 +169,13 @@ class SQLGenerator:
                         conn_class = conn.get('class', '')
                         connection_types[conn_name] = conn_class
                         print(f"      Found connection: {conn_name} -> {conn_class}")
+                        
+                        # Also map partial connection names (bigquery connections often have partial matches)
+                        if 'bigquery' in conn_name.lower():
+                            # Map any connection starting with the base name
+                            base_name = conn_name.split('.')[0] if '.' in conn_name else conn_name
+                            connection_types[base_name] = conn_class
+                            print(f"      Mapped base connection: {base_name} -> {conn_class}")
                 
                 # Check direct connections
                 for conn in ds.findall('.//connection[@class]'):
@@ -177,53 +184,55 @@ class SQLGenerator:
                         connection_types['direct'] = conn_class
                         print(f"      Found direct connection: {conn_class}")
                 
-                # STEP 2: Process all relation elements based on their connection type
-                for relation in ds.findall('.//relation'):
-                    relation_type = relation.get('type', '')
+                # STEP 2: Process ONLY text relations (actual custom SQL) - skip joins and table references
+                text_relations = [r for r in ds.findall('.//relation') if r.get('type') == 'text' and r.text and r.text.strip()]
+                print(f"      Found {len(text_relations)} text relations (custom SQL)")
+                
+                for relation in text_relations:
                     connection_name = relation.get('connection', '')
-                    query_name = relation.get('name', 'Query')
-                    table_name = relation.get('table', '')
+                    query_name = relation.get('name', 'Custom Query')
                     
                     # Determine the connection class for this relation
                     conn_class = connection_types.get(connection_name, 'unknown')
                     
-                    print(f"      Processing relation: {query_name} (type={relation_type}, conn={connection_name}, class={conn_class})")
+                    # If we didn't find exact match, try fuzzy matching for BigQuery
+                    if conn_class == 'unknown' and connection_name:
+                        for conn_key, conn_value in connection_types.items():
+                            if ('bigquery' in conn_key.lower() and 'bigquery' in connection_name.lower()) or \
+                               (conn_key in connection_name or connection_name in conn_key):
+                                conn_class = conn_value
+                                print(f"      Fuzzy matched: {connection_name} -> {conn_key} ({conn_class})")
+                                break
                     
-                    # Process based on relation type and connection class
-                    if relation_type == 'text' and relation.text and relation.text.strip():
-                        # This is custom SQL
-                        sql_type = self._get_sql_type_for_connection(conn_class, 'Custom SQL')
+                    print(f"      Processing SQL: {query_name} (conn={connection_name}, class={conn_class})")
+                    
+                    # Clean up SQL (remove << >> artifacts from Tableau)
+                    sql_text = relation.text.strip()
+                    sql_text = sql_text.replace('<<', '<').replace('>>', '>')
+                    sql_text = re.sub(r'\r\n', r'\n', sql_text)  # Normalize newlines
+                    
+                    # This is custom SQL - the real queries we want!
+                    sql_type = self._get_sql_type_for_connection(conn_class, 'Custom SQL')
+                    sql_queries.append({
+                        'name': query_name,
+                        'sql': sql_text,
+                        'type': sql_type,
+                        'connection': connection_name,
+                        'connection_class': conn_class
+                    })
+                
+                # STEP 2b: Extract join information separately (but don't treat as SQL queries)
+                join_relations = [r for r in ds.findall('.//relation') if r.get('type') == 'join']
+                if join_relations:
+                    print(f"      Found {len(join_relations)} join relations (for documentation)")
+                    join_info = self._extract_joins_for_datasource(ds)
+                    if join_info:
                         sql_queries.append({
-                            'name': query_name,
-                            'sql': relation.text.strip(),
-                            'type': sql_type,
-                            'connection': connection_name,
-                            'connection_class': conn_class
-                        })
-                        
-                    elif relation_type == 'join':
-                        # This is a join relation
-                        join_info = self._extract_join_from_relation(relation, conn_class)
-                        if join_info:
-                            sql_type = self._get_sql_type_for_connection(conn_class, 'Join Info')
-                            sql_queries.append({
-                                'name': f'{query_name} Join',
-                                'sql': join_info,
-                                'type': sql_type,
-                                'connection': connection_name,
-                                'connection_class': conn_class
-                            })
-                            
-                    elif table_name:
-                        # This is a table reference
-                        table_sql = self._generate_table_sql(table_name, conn_class)
-                        sql_type = self._get_sql_type_for_connection(conn_class, 'Table Reference')
-                        sql_queries.append({
-                            'name': f'Table: {table_name}',
-                            'sql': table_sql,
-                            'type': sql_type,
-                            'connection': connection_name,
-                            'connection_class': conn_class
+                            'name': 'Join Information',
+                            'sql': join_info,
+                            'type': 'Join Documentation',
+                            'connection': '',
+                            'connection_class': 'documentation'
                         })
                 
                 # STEP 3: Extract connection information for documentation
@@ -388,6 +397,31 @@ class SQLGenerator:
                         right_clean = self.clean_field_reference(right_field)
                         join_condition = f"-- JOIN CONDITION: {left_clean} = {right_clean}"
                         if join_condition not in join_info:
+                            join_info.append(join_condition)
+        
+        return '\n'.join(join_info) if join_info else None
+    
+    def _extract_joins_for_datasource(self, datasource_xml):
+        """Extract join information for the entire datasource."""
+        join_info = []
+        
+        # Look for join relations
+        for relation in datasource_xml.findall('.//relation[@type="join"]'):
+            join_type = relation.get('join', 'inner')
+            join_info.append(f"-- {join_type.upper()} JOIN detected")
+            
+            # Extract join conditions
+            for clause in relation.findall('.//clause[@type="join"]'):
+                for expr in clause.findall('.//expression[@op="="]'):
+                    nested_exprs = expr.findall('.//expression[@op]')
+                    if len(nested_exprs) >= 2:
+                        left_field = nested_exprs[0].get('op', '')
+                        right_field = nested_exprs[1].get('op', '')
+                        
+                        if left_field and right_field:
+                            left_clean = self.clean_field_reference(left_field)
+                            right_clean = self.clean_field_reference(right_field)
+                            join_condition = f"-- JOIN ON: {left_clean} = {right_clean}"
                             join_info.append(join_condition)
         
         return '\n'.join(join_info) if join_info else None

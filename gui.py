@@ -53,7 +53,7 @@ class ImprovedTableauConverterGUI:
         main_frame.columnconfigure(1, weight=1)
         
         # File selection section
-        ttk.Label(main_frame, text="TWBX File:", font=('Arial', 12, 'bold')).grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
+        ttk.Label(main_frame, text="Tableau File:", font=('Arial', 12, 'bold')).grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
         
         file_frame = ttk.Frame(main_frame)
         file_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
@@ -82,7 +82,7 @@ class ImprovedTableauConverterGUI:
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=6, column=0, columnspan=2, pady=20)
         
-        self.analyze_btn = ttk.Button(button_frame, text="🔍 Analyze TWBX", command=self.analyze_twbx, style="Accent.TButton")
+        self.analyze_btn = ttk.Button(button_frame, text="🔍 Analyze Tableau", command=self.analyze_twbx, style="Accent.TButton")
         self.analyze_btn.pack(side=tk.LEFT, padx=(0, 10))
         
         self.extract_btn = ttk.Button(button_frame, text="📊 Extract Hyper Data", command=self.extract_hyper_data, state="disabled")
@@ -113,10 +113,10 @@ class ImprovedTableauConverterGUI:
         status_bar.grid(row=12, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
         
     def browse_file(self):
-        """Browse for TWBX file."""
+        """Browse for TWBX or TWB file."""
         file_path = filedialog.askopenfilename(
-            title="Select TWBX File",
-            filetypes=[("Tableau files", "*.twbx"), ("All files", "*.*")]
+            title="Select Tableau File",
+            filetypes=[("Tableau files", "*.twbx;*.twb"), ("TWBX files", "*.twbx"), ("TWB files", "*.twb"), ("All files", "*.*")]
         )
         
         if file_path:

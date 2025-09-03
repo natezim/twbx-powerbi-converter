@@ -511,6 +511,25 @@ class CSVExporter:
                         f.write(f"  {formula}\n")
                         f.write(f"  {'-' * 50}\n\n")
                 
+                # Custom SQL Queries section
+                if datasource_info.get('sql_info', {}).get('custom_sql'):
+                    f.write(f"CUSTOM SQL QUERIES:\n")
+                    f.write(f"-------------------\n")
+                    for sql_query in datasource_info['sql_info']['custom_sql']:
+                        query_name = sql_query.get('name', 'Unknown Query')
+                        query_type = sql_query.get('type', 'SQL Query')
+                        sql_text = sql_query.get('sql', '').strip()
+                        connection = sql_query.get('connection', '')
+                        
+                        f.write(f"{query_name} ({query_type}):\n")
+                        if connection:
+                            f.write(f"  Connection: {connection}\n")
+                        f.write(f"  SQL:\n")
+                        # Indent each line of the SQL
+                        for line in sql_text.split('\n'):
+                            f.write(f"    {line}\n")
+                        f.write(f"  {'-' * 50}\n\n")
+                
                 if used_fields:
                     f.write(f"\n")
                     f.write(f"SQL COLUMNS:\n")
