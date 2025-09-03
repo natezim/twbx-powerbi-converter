@@ -9,7 +9,8 @@ from core.tableau_parser import TableauParser
 from core.field_extractor import FieldExtractor
 from core.sql_generator import SQLGenerator
 from core.csv_exporter import CSVExporter
-from utils.file_utils import find_twbx_files, create_safe_filename, ensure_directory_exists, validate_twbx_file
+from core.thumbnail_extractor import ThumbnailExtractor
+from utils.file_utils import find_tableau_files, find_twbx_files, create_safe_filename, ensure_directory_exists, validate_tableau_file, validate_twbx_file
 
 
 class TableauMigrator:
@@ -20,20 +21,22 @@ class TableauMigrator:
         self.field_extractor = None
         self.sql_generator = None
         self.csv_exporter = CSVExporter()
+        self.thumbnail_extractor = ThumbnailExtractor()
     
-    def process_twbx_file(self, twbx_path, skip_hyper_extraction=False):
-        """Process a single TWBX file through the complete pipeline."""
-        print(f"🔄 Processing: {twbx_path}")
+    def process_tableau_file(self, tableau_path, skip_hyper_extraction=False):
+        """Process a single Tableau file (.twb or .twbx) through the complete pipeline."""
+        print(f"🔄 Processing: {tableau_path}")
         print("-" * 50)
         
         try:
-            # 1. Parse TWBX file
-            self.parser = TableauParser(twbx_path)
+            # 1. Parse Tableau file
+            self.parser = TableauParser(tableau_path)
             if not self.parser.extract_and_parse():
-                print(f"❌ Failed to parse {twbx_path}")
+                print(f"❌ Failed to parse {tableau_path}")
                 return None
             
-            print("✅ TWBX parsed successfully using official Tableau API + XML")
+            file_type = "TWBX" if tableau_path.endswith('.twbx') else "TWB"
+            print(f"✅ {file_type} parsed successfully using official Tableau API + XML")
             
             # 2. Extract data sources
             print("🔍 Analyzing data sources...")
@@ -59,7 +62,7 @@ class TableauMigrator:
             return data_sources
             
         except Exception as e:
-            print(f"❌ Error processing {twbx_path}: {e}")
+            print(f"❌ Error processing {tableau_path}: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -493,6 +496,10 @@ class TableauMigrator:
                     self.csv_exporter.export_dashboard_usage_csv('output', data_sources, ds['dashboard_info'])
                     break  # Only need to export once since dashboard info is workbook-level
         
+        # Extract thumbnails from the workbook
+        print("🖼️  Extracting thumbnails...")
+        self._extract_thumbnails(data_sources)
+        
         # Export hyper data to Excel (if any exists and not skipped)
         if not skip_hyper_data:
             print("📊 Exporting Hyper data to Excel...")
@@ -516,6 +523,48 @@ class TableauMigrator:
                     self.field_extractor.export_hyper_data_to_excel(ds['hyper_data'], hyper_output_dir)
         else:
             print("📊 Skipping Hyper data export (regular analysis mode)")
+    
+    def _extract_thumbnails(self, data_sources):
+        """Extract thumbnails from the workbook and save as PNG files."""
+        if not data_sources or not self.xml_root:
+            print("   ℹ️  No data sources or XML root available for thumbnail extraction")
+            return
+        
+        try:
+            # Get workbook name for creating output directory
+            workbook_name = data_sources[0].get('workbook_name', 'Unknown')
+            if workbook_name is None:
+                workbook_name = 'Unknown'
+            
+            # Create workbook-specific output directory
+            safe_workbook = str(workbook_name).replace(' ', '_').replace('/', '_')
+            safe_workbook = ''.join(c for c in safe_workbook if c.isalnum() or c in '_-')
+            output_dir = os.path.join('output', safe_workbook)
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Extract thumbnails using the thumbnail extractor
+            results = self.thumbnail_extractor.extract_thumbnails(self.xml_root, output_dir)
+            
+            # Display summary
+            if results['extracted_count'] > 0:
+                print(f"   ✅ Successfully extracted {results['extracted_count']} thumbnail(s)")
+                print(f"   📁 Saved to: {results['screenshots_dir']}")
+                
+                # Display individual files
+                for file_info in results['saved_files']:
+                    size_kb = file_info['file_size'] / 1024
+                    print(f"      • {file_info['filename']} ({file_info['dimensions']}, {size_kb:.1f} KB)")
+            else:
+                print("   ℹ️  No thumbnails found in this workbook")
+            
+            # Display any errors
+            if results['errors']:
+                print("   ⚠️  Thumbnail extraction errors:")
+                for error in results['errors']:
+                    print(f"      • {error}")
+                    
+        except Exception as e:
+            print(f"   ❌ Thumbnail extraction failed: {str(e)}")
 
 
 def main():
@@ -523,41 +572,41 @@ def main():
     print("🔍 Tableau to Power BI Converter - Modular Edition")
     print("=" * 70)
     
-    # Find all TWBX files in current directory
-    twbx_files = find_twbx_files('.')
+    # Find all Tableau files (.twb and .twbx) in current directory
+    tableau_files = find_tableau_files('.')
     
-    if not twbx_files:
-        print("❌ No .twbx files found in current directory")
-        print("Please place one or more .twbx files in the current directory")
+    if not tableau_files:
+        print("❌ No Tableau files (.twb or .twbx) found in current directory")
+        print("Please place one or more Tableau files in the current directory")
         return
     
-    print(f"📂 Found {len(twbx_files)} TWBX file(s): {', '.join(twbx_files)}")
+    print(f"📂 Found {len(tableau_files)} Tableau file(s): {', '.join(tableau_files)}")
     print()
     
     # Initialize the migrator
     migrator = TableauMigrator()
     
-    # Process each TWBX file
-    for twbx_file in twbx_files:
+    # Process each Tableau file
+    for tableau_file in tableau_files:
         # Validate the file
-        is_valid, message = validate_twbx_file(twbx_file)
+        is_valid, message = validate_tableau_file(tableau_file)
         if not is_valid:
-            print(f"❌ Skipping {twbx_file}: {message}")
+            print(f"❌ Skipping {tableau_file}: {message}")
             continue
         
         # Process the file
-        data_sources = migrator.process_twbx_file(twbx_file)
+        data_sources = migrator.process_tableau_file(tableau_file)
         
         if data_sources:
             # Export results
             migrator.export_results(data_sources)
-            print(f"✅ Extraction complete for {twbx_file}!")
+            print(f"✅ Extraction complete for {tableau_file}!")
         else:
-            print(f"❌ Failed to process {twbx_file}")
+            print(f"❌ Failed to process {tableau_file}")
         
         print()  # Add spacing between files
     
-    print("🎉 All TWBX files processed!")
+    print("🎉 All Tableau files processed!")
 
 
 if __name__ == "__main__":
