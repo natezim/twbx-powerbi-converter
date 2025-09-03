@@ -193,7 +193,7 @@ class FieldExtractor:
         return filter_details
 
     def extract_dashboard_worksheet_info(self, xml_root):
-        """Extract dashboard and worksheet information with field usage and filters."""
+        """Extract dashboard and worksheet information with field usage and chart types."""
         if not self.xml_root:
             return {}
         
@@ -209,147 +209,24 @@ class FieldExtractor:
             worksheet_name = worksheet.get('name', 'Unknown')
             print(f"   Processing worksheet: {worksheet_name}")
             
-            # Get worksheet type (chart type) - look for table, chart, map, etc.
-            worksheet_type = 'Unknown'
-            table_elem = worksheet.find('.//table')
-            chart_elem = worksheet.find('.//chart')
-            map_elem = worksheet.find('.//map')
+            # Extract fields used in this worksheet from datasource-dependencies
+            used_fields = self._extract_used_fields_from_worksheet(worksheet)
             
-            if table_elem is not None:
-                worksheet_type = 'Table'
-            elif chart_elem is not None:
-                worksheet_type = 'Chart'
-            elif map_elem is not None:
-                worksheet_type = 'Map'
+            # Determine chart type based on field arrangements and mark type
+            chart_type = self._infer_chart_type_from_worksheet(worksheet, used_fields)
             
-            # Extract fields used in this worksheet
-            used_fields = []
-            field_elements = worksheet.findall('.//column')
-            for field_elem in field_elements:
-                field_name = field_elem.get('name', '')
-                if field_name:
-                    # For calculated fields, use the caption (display name) instead of internal ID
-                    if field_elem.find('calculation') is not None:
-                        # This is a calculated field - use caption if available
-                        caption = field_elem.get('caption', '')
-                        if caption:
-                            used_fields.append(caption)
-                        else:
-                            # Fallback to cleaned name if no caption
-                            clean_name = field_name.replace('[', '').replace(']', '')
-                            used_fields.append(clean_name)
-                    else:
-                        # Regular field - use cleaned name
-                        clean_name = field_name.replace('[', '').replace(']', '')
-                        used_fields.append(clean_name)
+            # Extract filters from this worksheet
+            filters = self._extract_filters_from_worksheet(worksheet)
             
-            # Extract filters applied to this worksheet
-            filters = []
-            filter_elements = worksheet.findall('.//filter')
-            for filter_elem in filter_elements:
-                filter_name = filter_elem.get('name', '')
-                filter_type = filter_elem.get('class', 'Unknown')
-                filter_field = filter_elem.get('column', '')
-                
-                if filter_field:
-                    # Clean up the filter field name
-                    clean_filter_field = filter_field.replace('[', '').replace(']', '')
-                    # Extract just the field name part (after the last dot)
-                    if '.' in clean_filter_field:
-                        field_part = clean_filter_field.split('.')[-1]
-                    else:
-                        field_part = clean_filter_field
-                    
-                    # Extract detailed filter information
-                    filter_details = self.extract_filter_details(filter_elem)
-                    
-                    filters.append({
-                        'name': filter_name or field_part,
-                        'type': filter_type,
-                        'field': field_part,
-                        'full_column': clean_filter_field,
-                        'function': filter_details.get('function', ''),
-                        'operation': filter_details.get('operation', ''),
-                        'values': filter_details.get('values', []),
-                        'behavior': filter_details.get('behavior', ''),
-                        'description': filter_details.get('description', '')
-                    })
-            
-            # Extract slicers (what users can filter on)
-            slicers = []
-            slice_elements = worksheet.findall('.//slices/column')
-            for slice_elem in slice_elements:
-                slice_text = slice_elem.text
-                if slice_text:
-                    clean_slice = slice_text.replace('[', '').replace(']', '')
-                    # Extract just the field name part
-                    if '.' in clean_slice:
-                        field_part = clean_slice.split('.')[-1]
-                    else:
-                        field_part = clean_slice
-                    slicers.append(field_part)
-            
-            # Extract layout information (rows and columns)
-            rows_layout = []
-            cols_layout = []
-            
-            rows_elem = worksheet.find('.//rows')
-            if rows_elem is not None and rows_elem.text:
-                rows_text = rows_elem.text
-                # Parse the complex row layout (e.g., "field1 / field2 / field3")
-                if '/' in rows_text:
-                    row_fields = [f.strip().replace('[', '').replace(']', '') for f in rows_text.split('/')]
-                    rows_layout = [f for f in row_fields if f and not f.startswith('(') and not f.endswith(')')]
-                else:
-                    clean_row = rows_text.replace('[', '').replace(']', '')
-                    if clean_row:
-                        rows_layout.append(clean_row)
-            
-            cols_elem = worksheet.find('.//cols')
-            if cols_elem is not None and cols_elem.text:
-                cols_text = cols_elem.text
-                if cols_text:
-                    clean_col = cols_text.replace('[', '').replace(']', '')
-                    if clean_col:
-                        cols_layout.append(clean_col)
-            
-            # Extract card layout information (UI structure)
-            cards_info = {}
-            cards_elem = worksheet.find('.//cards')
-            if cards_elem is not None:
-                for edge in cards_elem.findall('.//edge'):
-                    edge_name = edge.get('name', '')
-                    edge_cards = []
-                    for card in edge.findall('.//card'):
-                        card_type = card.get('type', '')
-                        edge_cards.append(card_type)
-                    if edge_cards:
-                        cards_info[edge_name] = edge_cards
-            
-            # Extract mark type (what kind of marks are used)
-            mark_type = 'Unknown'
-            mark_elem = worksheet.find('.//mark')
-            if mark_elem is not None:
-                mark_type = mark_elem.get('class', 'Unknown')
-            
-            # Extract aggregation settings
-            aggregation_enabled = False
-            agg_elem = worksheet.find('.//aggregation')
-            if agg_elem is not None:
-                aggregation_enabled = agg_elem.get('value', 'false') == 'true'
-            
+            # Store worksheet information including filters
             dashboard_info[worksheet_name] = {
                 'type': 'worksheet',
-                'class': worksheet_type,
-                'mark_type': mark_type,
-                'aggregation_enabled': aggregation_enabled,
+                'chart_type': chart_type,
                 'used_fields': used_fields,
-                'filters': filters,
-                'slicers': slicers,
-                'rows_layout': rows_layout,
-                'columns_layout': cols_layout,
-                'cards_layout': cards_info
+                'filters': filters
             }
+            
+
         
         # Extract dashboards
         dashboards = self.xml_root.findall('.//dashboard')
@@ -397,6 +274,148 @@ class FieldExtractor:
         
         print(f"   Total items found: {len(dashboard_info)}")
         return dashboard_info
+
+    def _extract_used_fields_from_worksheet(self, worksheet):
+        """Extract fields used in worksheet from datasource-dependencies."""
+        used_fields = []
+        
+        # Look for datasource-dependencies which shows actual field usage
+        deps = worksheet.findall('.//datasource-dependencies')
+        for dep in deps:
+            # Extract column elements which show field usage like [none:corpus:nk], [sum:word_count:qk]
+            columns = dep.findall('.//column')
+            for col in columns:
+                col_name = col.get('name', '')
+                if col_name and col_name.startswith('[') and col_name.endswith(']'):
+                    # Parse field name from format like [none:corpus:nk] -> corpus
+                    # or [sum:word_count:qk] -> word_count
+                    clean_name = self._clean_field_name_from_dependency(col_name)
+                    if clean_name and clean_name not in used_fields:
+                        used_fields.append(clean_name)
+        
+        # Fallback: if no datasource-dependencies, try basic column extraction
+        if not used_fields:
+            field_elements = worksheet.findall('.//column')
+            for field_elem in field_elements:
+                field_name = field_elem.get('name', '')
+                if field_name:
+                    clean_name = field_name.replace('[', '').replace(']', '').split(':')[-1]
+                    if clean_name and clean_name not in used_fields:
+                        used_fields.append(clean_name)
+        
+        return used_fields
+
+    def _clean_field_name_from_dependency(self, dependency_name):
+        """Clean field name from datasource dependency format like [none:corpus:nk] -> corpus."""
+        # Remove brackets
+        clean = dependency_name.strip('[]')
+        
+        # Split by colons and get the field name part (middle section)
+        parts = clean.split(':')
+        if len(parts) >= 2:
+            field_name = parts[1]  # Get the field name part
+            
+            # Convert to title case for better readability
+            return field_name.replace('_', ' ').title().replace(' ', '_')
+        
+        return clean
+
+    def _infer_chart_type_from_worksheet(self, worksheet, used_fields):
+        """Infer chart type based on field arrangements, mark type, and worksheet name."""
+        worksheet_name = worksheet.get('name', '').lower()
+        
+        # First, check if the worksheet name gives us a clear hint
+        if 'table' in worksheet_name:
+            return 'Table'
+        elif 'line' in worksheet_name:
+            return 'Line Chart'
+        elif 'bar' in worksheet_name or 'column' in worksheet_name:
+            return 'Bar Chart'
+        elif 'scatter' in worksheet_name or 'plot' in worksheet_name:
+            return 'Scatter Plot'
+        elif 'map' in worksheet_name:
+            return 'Map'
+        elif 'pie' in worksheet_name:
+            return 'Pie Chart'
+        
+        # Check mark type if name doesn't give clear indication
+        mark_elem = worksheet.find('.//mark')
+        mark_class = mark_elem.get('class', 'Automatic') if mark_elem is not None else 'Automatic'
+        
+        # Extract rows and columns arrangement
+        rows_elem = worksheet.find('.//rows')
+        cols_elem = worksheet.find('.//cols')
+        
+        rows_text = rows_elem.text if rows_elem is not None and rows_elem.text else ''
+        cols_text = cols_elem.text if cols_elem is not None and cols_elem.text else ''
+        
+        # Count measures vs dimensions in field usage (improved detection)
+        measures_count = 0
+        dimensions_count = 0
+        
+        # Look for typical measure names (numbers, aggregations)
+        measure_words = ['count', 'sum', 'avg', 'total', 'amount', 'age', 'weight', 'pounds']
+        dimension_words = ['name', 'type', 'state', 'use', 'male', 'corpus']
+        
+        for field in used_fields:
+            field_lower = field.lower()
+            if any(word in field_lower for word in measure_words) or any(char.isdigit() for char in field):
+                measures_count += 1
+            elif any(word in field_lower for word in dimension_words) or '_' not in field:
+                dimensions_count += 1
+        
+        # Infer chart type based on patterns
+        if 'table' in mark_class.lower() or len(used_fields) > 4:
+            return 'Table'
+        elif measures_count >= 2 and dimensions_count >= 1:
+            return 'Line Chart'  # Multiple measures over time/dimension
+        elif measures_count == 1 and dimensions_count >= 1:
+            if any(word in (rows_text + cols_text).lower() for word in ['date', 'time', 'month', 'year']):
+                return 'Line Chart'
+            else:
+                return 'Bar Chart'
+        elif mark_class.lower() in ['circle', 'point']:
+            return 'Scatter Plot'
+        elif mark_class.lower() in ['map', 'polygon']:
+            return 'Map'
+        else:
+            return 'Bar Chart'  # Default fallback
+
+    def _extract_filters_from_worksheet(self, worksheet):
+        """Extract filter information from a worksheet using the existing extract_filter_details method."""
+        filters = []
+        
+        # Find all filter elements in the worksheet
+        filter_elements = worksheet.findall('.//filter')
+        for filter_elem in filter_elements:
+            filter_name = filter_elem.get('name', '')
+            filter_type = filter_elem.get('class', 'Unknown')
+            filter_field = filter_elem.get('column', '')
+            
+            if filter_field:
+                # Clean up the filter field name
+                clean_filter_field = filter_field.replace('[', '').replace(']', '')
+                # Extract just the field name part (after the last dot)
+                if '.' in clean_filter_field:
+                    field_part = clean_filter_field.split('.')[-1]
+                else:
+                    field_part = clean_filter_field
+                
+                # Use the existing extract_filter_details method
+                filter_details = self.extract_filter_details(filter_elem)
+                
+                filters.append({
+                    'name': filter_name or field_part,
+                    'type': filter_type,
+                    'field': field_part,
+                    'full_column': clean_filter_field,
+                    'function': filter_details.get('function', ''),
+                    'operation': filter_details.get('operation', ''),
+                    'values': filter_details.get('values', []),
+                    'description': filter_details.get('description', '')
+                })
+        
+        return filters
 
     def extract_calculated_fields_from_workbook(self, field_metadata):
         """Extract calculated field information from workbook XML using official Tableau API."""

@@ -36,7 +36,7 @@ class CSVExporter:
         return processed_alias  # Return the processed alias if no mapping found
     
     def export_field_mapping_csv(self, output_dir, data_sources):
-        """Export field mapping to CSV for Power BI migration."""
+        """Export field mapping to CSV for Power BI migration - combined for all datasources."""
         # Create workbook-specific folder
         if data_sources:
             workbook_name = data_sources[0].get('workbook_name', 'Unknown')
@@ -59,26 +59,10 @@ class CSVExporter:
         else:
             workbook_folder = output_dir
         
-        # For single datasource workbooks, use simple filenames
-        if len(data_sources) == 1:
-            csv_file = os.path.join(workbook_folder, "field_mapping.csv")
-            ds = data_sources[0]
-            if ds['fields']:
-                self._write_field_mapping_csv(csv_file, ds)
-                print(f"✅ Created field mapping CSV: {csv_file}")
-        else:
-            # Multiple datasources - use datasource names
-            for ds in data_sources:
-                if not ds['fields']:
-                    continue
-                
-                datasource_name = ds.get('caption') or ds.get('name') or 'Unknown'
-                safe_datasource = datasource_name.replace(' ', '_').replace('/', '_')
-                safe_datasource = ''.join(c for c in safe_datasource if c.isalnum() or c in '_-')
-                csv_file = os.path.join(workbook_folder, f"{safe_datasource}_field_mapping.csv")
-                
-                self._write_field_mapping_csv(csv_file, ds)
-                print(f"✅ Created field mapping CSV: {csv_file}")
+        # Create combined field mapping CSV for all datasources
+        csv_file = os.path.join(workbook_folder, f"{safe_workbook}_field_mapping.csv")
+        self._write_combined_field_mapping_csv(csv_file, data_sources)
+        print(f"✅ Created combined field mapping CSV: {csv_file}")
 
     def _write_field_mapping_csv(self, csv_file, ds):
         """Helper method to write field mapping CSV for a single datasource."""
@@ -197,6 +181,106 @@ class CSVExporter:
                     'Calculation_Formula': clean_formula
                 })
 
+    def _write_combined_field_mapping_csv(self, csv_file, data_sources):
+        """Helper method to write combined field mapping CSV for all datasources."""
+        # Collect all fields from all datasources
+        all_fields = []
+        
+        for ds in data_sources:
+            if not ds.get('fields'):
+                continue
+                
+            datasource_name = ds.get('caption') or ds.get('name') or 'Unknown'
+            
+            # Debug: Show calculated fields and parameters for this datasource
+            calc_fields = [f for f in ds['fields'] if f.get('is_calculated', False)]
+            param_fields = [f for f in ds['fields'] if f.get('is_parameter', False)]
+            print(f"   CSV Export ({datasource_name}): Found {len(calc_fields)} calculated fields: {[f.get('name', 'Unknown') for f in calc_fields]}")
+            if param_fields:
+                print(f"   CSV Export ({datasource_name}): Found {len(param_fields)} parameters: {[f.get('name', 'Unknown') for f in param_fields]}")
+            
+            # Add datasource name to each field
+            for field in ds['fields']:
+                field_copy = field.copy()
+                field_copy['datasource_name'] = datasource_name
+                all_fields.append(field_copy)
+        
+        if not all_fields:
+            print("   No fields to export")
+            return
+        
+        # Sort fields by datasource, then by table name, then by column name
+        # Put calculated fields at the end since they don't have table names
+        sorted_fields = sorted(all_fields, key=lambda x: (
+            x.get('datasource_name', ''),
+            x.get('is_calculated', False),  # Calculated fields last within each datasource
+            x.get('table_name', ''), 
+            x.get('remote_name', '')
+        ))
+        
+        # Write CSV with field mapping including usage and calculated field info
+        with open(csv_file, 'w', newline='', encoding='utf-8') as csvfile:
+            fieldnames = ['Datasource', 'Original_Field_Name', 'Tableau_Field_Name', 'Data_Type', 'Table_Name', 'Table_Reference_SQL', 'Used_In_Workbook', 'Type', 'Calculation_Formula']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            
+            # Write header
+            writer.writeheader()
+            
+            # Write field information
+            for field in sorted_fields:
+                # Get field information
+                original_name = (field.get('remote_name') or '').strip()
+                
+                # For tableau_name, prioritize alias/caption for calculated fields
+                is_calculated = field.get('is_calculated', False)
+                is_parameter = field.get('is_parameter', False)
+                
+                if is_calculated:
+                    # For calculated fields, use caption/alias if available, otherwise name
+                    tableau_name = field.get('caption') or field.get('api_caption') or field.get('name', '')
+                else:
+                    tableau_name = field.get('caption', field.get('name', ''))
+                
+                # Determine field type
+                if is_parameter:
+                    field_type = "Parameter"
+                elif is_calculated:
+                    field_type = "Calculated Field"
+                else:
+                    field_type = "Column"
+                
+                # Get calculation formula if it's a calculated field
+                formula = field.get('calculation_formula') or ''
+                
+                # Clean up the formula for CSV (remove newlines, extra spaces)
+                clean_formula = ' '.join(formula.split()) if formula else ''
+                
+                # Get table name and reference
+                table_name = field.get('table_name', '')
+                if not table_name and not is_calculated and not is_parameter:
+                    table_name = field.get('table_reference', 'Unknown')
+                
+                # For parameters, show parameter info in table reference
+                if is_parameter and 'parameter_value' in field:
+                    table_ref_sql = f"PARAMETER: {tableau_name} = {field.get('parameter_value', 'No default')}"
+                else:
+                    table_ref_sql = f"{table_name}.{original_name}" if original_name and table_name else original_name or tableau_name
+                
+                # Determine if field is used in workbook
+                used_status = "Yes" if field.get('used_in_workbook', False) else "No"
+                
+                writer.writerow({
+                    'Datasource': field.get('datasource_name', ''),
+                    'Original_Field_Name': original_name,
+                    'Tableau_Field_Name': tableau_name,
+                    'Data_Type': field.get('datatype', 'Unknown'),
+                    'Table_Name': table_name,
+                    'Table_Reference_SQL': table_ref_sql,
+                    'Used_In_Workbook': used_status,
+                    'Type': field_type,
+                    'Calculation_Formula': clean_formula
+                })
+
     def export_setup_guide_txt(self, output_dir, data_sources):
         """Export a simple text setup guide for Power BI migration."""
         # Create workbook-specific folder
@@ -262,17 +346,14 @@ class CSVExporter:
                     f.write(f"CONNECTION DETAILS:\n")
                     f.write(f"------------------\n")
                     for i, conn in enumerate(datasource_info['connections'], 1):
-                        f.write(f"Connection {i}:\n")
+                        conn_type = conn.get('dbclass', 'N/A')
+                        f.write(f"Connection {i} ({conn_type}):\n")
                         
-                        # Standard connection properties
-                        f.write(f"  Server: {conn.get('server', 'N/A')}\n")
-                        f.write(f"  Database: {conn.get('dbname', 'N/A')}\n")
-                        f.write(f"  Username: {conn.get('username', 'N/A')}\n")
-                        f.write(f"  Type: {conn.get('dbclass', 'N/A')}\n")
-                        f.write(f"  Port: {conn.get('port', 'N/A')}\n")
-                        
-                        # BigQuery-specific properties
-                        if conn.get('dbclass') == 'bigquery':
+                        # BigQuery-specific formatting
+                        if conn_type == 'bigquery':
+                            # Show BigQuery-specific fields in priority order
+                            if conn.get('billing_project'):
+                                f.write(f"  Billing Project: {conn.get('billing_project')}\n")
                             if conn.get('project'):
                                 f.write(f"  Project: {conn.get('project')}\n")
                             if conn.get('dataset'):
@@ -281,6 +362,20 @@ class CSVExporter:
                                 f.write(f"  Location: {conn.get('location')}\n")
                             if conn.get('region'):
                                 f.write(f"  Region: {conn.get('region')}\n")
+                            if conn.get('authentication'):
+                                f.write(f"  Authentication: {conn.get('authentication')}\n")
+                            if conn.get('connection_dialect'):
+                                f.write(f"  Connection Dialect: {conn.get('connection_dialect')}\n")
+                            if conn.get('username'):
+                                f.write(f"  Username: {conn.get('username')}\n")
+                            if conn.get('server_oauth'):
+                                f.write(f"  Server OAuth: {conn.get('server_oauth')}\n")
+                        else:
+                            # Standard connection properties for non-BigQuery
+                            f.write(f"  Server: {conn.get('server', 'N/A')}\n")
+                            f.write(f"  Database: {conn.get('dbname', 'N/A')}\n")
+                            f.write(f"  Username: {conn.get('username', 'N/A')}\n")
+                            f.write(f"  Port: {conn.get('port', 'N/A')}\n")
                         
                         # Other cloud database properties
                         if conn.get('region') and conn.get('dbclass') != 'bigquery':
@@ -294,19 +389,71 @@ class CSVExporter:
                     f.write(f"----------------\n")
                     for alias, table_info in sorted(datasource_info['sql_info']['all_tables'].items()):
                         table_name = table_info['table_name']
-                        clean_table = table_name.replace('[', '').replace(']', '').replace(' ', '_')
-                        if alias != clean_table:
-                            f.write(f"  {clean_table} as {alias}\n")
+                        
+                        # Format BigQuery tables with billing project
+                        if conn_type == 'bigquery':
+                            # Get billing project from connection info
+                            billing_project = None
+                            dataset = None
+                            for conn in datasource_info.get('connections', []):
+                                if conn.get('dbclass') == 'bigquery':
+                                    billing_project = conn.get('billing_project') or conn.get('project')
+                                    dataset = conn.get('dataset')
+                                    break
+                            
+                            # Clean the table name and format for BigQuery
+                            clean_table = table_name.replace('[', '').replace(']', '').replace('`', '')
+                            if '.' in clean_table:
+                                table_parts = clean_table.split('.')
+                                actual_table = table_parts[-1]  # Get the last part (table name)
+                            else:
+                                actual_table = clean_table
+                            
+                            if billing_project and dataset:
+                                formatted_table = f"{billing_project}.{dataset}.{actual_table}"
+                            else:
+                                formatted_table = clean_table
                         else:
-                            f.write(f"  {clean_table}\n")
+                            formatted_table = table_name.replace('[', '').replace(']', '').replace(' ', '_')
+                        
+                        if alias != formatted_table.split('.')[-1]:  # Compare with just the table name part
+                            f.write(f"  {formatted_table} as {alias}\n")
+                        else:
+                            f.write(f"  {formatted_table}\n")
                     f.write(f"\n")
                 
                 # Main table
                 if datasource_info.get('sql_info', {}).get('all_tables'):
                     first_alias = list(datasource_info['sql_info']['all_tables'].keys())[0]
                     main_table = datasource_info['sql_info']['all_tables'][first_alias]['table_name']
-                    clean_main_table = main_table.replace('[', '').replace(']', '').replace(' ', '_')
-                    f.write(f"MAIN TABLE: {clean_main_table} (aliased as {first_alias})\n\n")
+                    
+                    # Format BigQuery main table with billing project
+                    if conn_type == 'bigquery':
+                        # Get billing project from connection info
+                        billing_project = None
+                        dataset = None
+                        for conn in datasource_info.get('connections', []):
+                            if conn.get('dbclass') == 'bigquery':
+                                billing_project = conn.get('billing_project') or conn.get('project')
+                                dataset = conn.get('dataset')
+                                break
+                        
+                        # Clean the table name and format for BigQuery
+                        clean_main_table = main_table.replace('[', '').replace(']', '').replace('`', '')
+                        if '.' in clean_main_table:
+                            table_parts = clean_main_table.split('.')
+                            actual_table = table_parts[-1]  # Get the last part (table name)
+                        else:
+                            actual_table = clean_main_table
+                        
+                        if billing_project and dataset:
+                            formatted_main_table = f"{billing_project}.{dataset}.{actual_table}"
+                        else:
+                            formatted_main_table = clean_main_table
+                    else:
+                        formatted_main_table = main_table.replace('[', '').replace(']', '').replace(' ', '_')
+                    
+                    f.write(f"MAIN TABLE: {formatted_main_table} (aliased as {first_alias})\n\n")
                 
                 # Hyper Data Tables section (if available)
                 if datasource_info.get('hyper_data'):
@@ -576,7 +723,7 @@ class CSVExporter:
         return True
 
     def export_dashboard_usage_csv(self, output_dir, data_sources, dashboard_info):
-        """Export dashboard and worksheet usage information to CSV."""
+        """Export dashboard and worksheet usage information to CSV - combined for all datasources."""
         # Create workbook-specific folder
         if data_sources:
             workbook_name = data_sources[0].get('workbook_name', 'Unknown')
@@ -586,30 +733,13 @@ class CSVExporter:
             os.makedirs(workbook_folder, exist_ok=True)
         else:
             workbook_folder = output_dir
+            safe_workbook = "workbook"
         
-        # For single datasource workbooks, use simple filenames
-        if len(data_sources) == 1:
-            csv_file = os.path.join(workbook_folder, "dashboard_usage.csv")
-        else:
-            # Multiple datasources - use datasource names
-            for ds in data_sources:
-                if not dashboard_info:
-                    continue
-                
-                datasource_name = ds.get('caption') or ds.get('name') or 'Unknown'
-                safe_datasource = datasource_name.replace(' ', '_').replace('/', '_')
-                safe_datasource = ''.join(c for c in safe_datasource if c.isalnum() or c in '_-')
-                csv_file = os.path.join(workbook_folder, f"{safe_datasource}_dashboard_usage.csv")
-                
-                self._write_dashboard_usage_csv(csv_file, dashboard_info)
-                print(f"✅ Created dashboard usage CSV: {csv_file}")
-            
-            return  # Exit early for multiple datasources
-        
-        # Single datasource processing
+        # Create combined dashboard usage CSV for all datasources
+        csv_file = os.path.join(workbook_folder, f"{safe_workbook}_dashboard_usage.csv")
         if dashboard_info:
-            self._write_dashboard_usage_csv(csv_file, dashboard_info)
-            print(f"✅ Created dashboard usage CSV: {csv_file}")
+            self._write_combined_dashboard_usage_csv(csv_file, data_sources, dashboard_info)
+            print(f"✅ Created combined dashboard usage CSV: {csv_file}")
 
     def _write_dashboard_usage_csv(self, csv_file, dashboard_info):
         """Helper method to write dashboard usage CSV."""
@@ -783,3 +913,93 @@ class CSVExporter:
                 return f'Custom mark type: {mark_type} - review for Power BI equivalent'
         
         return 'Review chart type manually for Power BI equivalent'
+
+    def _write_combined_dashboard_usage_csv(self, csv_file, data_sources, dashboard_info):
+        """Helper method to write combined dashboard usage CSV for all datasources."""
+        # Write CSV with essential dashboard and worksheet information
+        with open(csv_file, 'w', newline='', encoding='utf-8') as csvfile:
+            fieldnames = ['Datasource', 'Item_Name', 'Item_Type', 'Chart_Type', 'Used_Fields', 'Filters', 'Filter_Function', 'Filter_Operation', 'Filter_Values', 'Filter_Description', 'Power_BI_Recommendations']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            
+            # Write header
+            writer.writeheader()
+            
+            # For each datasource, find which dashboard items belong to it
+            for ds in data_sources:
+                datasource_name = ds.get('caption') or ds.get('name') or 'Unknown'
+                
+                # Write dashboard and worksheet data for this datasource
+                for item_name, item_info in dashboard_info.items():
+                    item_type = item_info.get('type', 'Unknown')
+                    
+                    if item_type == 'worksheet':
+                        # Use the improved chart type from our enhanced extraction
+                        chart_type = item_info.get('chart_type', item_info.get('class', 'Unknown'))
+                        used_fields = ', '.join(item_info.get('used_fields', []))
+                        
+                        # Process filter information
+                        filters_data = item_info.get('filters', [])
+                        filters_list = []
+                        filter_functions = []
+                        filter_operations = []
+                        filter_values = []
+                        filter_descriptions = []
+                        
+                        for filter_item in filters_data:
+                            # Build filter description
+                            filter_desc = f"{filter_item['field']}({filter_item['type']})"
+                            if filter_item['name'] and filter_item['name'] != filter_item['field']:
+                                filter_desc = f"{filter_item['name']}: {filter_desc}"
+                            filters_list.append(filter_desc)
+                            
+                            # Extract detailed filter information
+                            filter_functions.append(filter_item.get('function', ''))
+                            filter_operations.append(filter_item.get('operation', ''))
+                            
+                            # Format filter values
+                            values = filter_item.get('values', [])
+                            if values:
+                                filter_values.append('; '.join(str(v) for v in values))
+                            else:
+                                filter_values.append('')
+                            
+                            filter_descriptions.append(filter_item.get('description', ''))
+                        
+                        # Convert lists to semicolon-separated strings or 'None' if empty
+                        filters_str = '; '.join(filters_list) if filters_list else 'None'
+                        filter_functions_str = '; '.join(filter_functions) if filter_functions else 'None'
+                        filter_operations_str = '; '.join(filter_operations) if filter_operations else 'None'
+                        filter_values_str = '; '.join(filter_values) if filter_values else 'None'
+                        filter_descriptions_str = '; '.join(filter_descriptions) if filter_descriptions else 'None'
+                        
+                        # Generate Power BI recommendations based on chart type
+                        power_bi_rec = self.get_powerbi_chart_recommendation(chart_type, item_info)
+                        
+                        writer.writerow({
+                            'Datasource': datasource_name,
+                            'Item_Name': item_name,
+                            'Item_Type': item_type,
+                            'Chart_Type': chart_type,
+                            'Used_Fields': used_fields,
+                            'Filters': filters_str,
+                            'Filter_Function': filter_functions_str,
+                            'Filter_Operation': filter_operations_str,
+                            'Filter_Values': filter_values_str,
+                            'Filter_Description': filter_descriptions_str,
+                            'Power_BI_Recommendations': power_bi_rec
+                        })
+                    
+                    elif item_type == 'dashboard':
+                        writer.writerow({
+                            'Datasource': datasource_name,
+                            'Item_Name': item_name,
+                            'Item_Type': item_type,
+                            'Chart_Type': 'Dashboard Container',
+                            'Used_Fields': 'See individual worksheets',
+                            'Filters': 'Dashboard-level filters',
+                            'Filter_Function': 'N/A',
+                            'Filter_Operation': 'N/A',
+                            'Filter_Values': 'N/A',
+                            'Filter_Description': 'N/A',
+                            'Power_BI_Recommendations': 'Create Power BI report with multiple pages/visuals'
+                        })

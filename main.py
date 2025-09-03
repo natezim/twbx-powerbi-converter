@@ -131,19 +131,31 @@ class TableauMigrator:
                     # Try to get BigQuery details from XML
                     xml_datasource = self.parser.find_datasource_xml(datasource.name)
                     if xml_datasource:
-                        # Look for BigQuery connection in XML
-                        for xml_conn in xml_datasource.findall('.//connection[@class="bigquery"]'):
+                        # Look for BigQuery connection in XML - check both direct and nested connections
+                        bigquery_connections = (xml_datasource.findall('.//connection[@class="bigquery"]') + 
+                                               xml_datasource.findall('.//named-connection//connection[@class="bigquery"]'))
+                        
+                        for xml_conn in bigquery_connections:
+                            # Extract all BigQuery-specific attributes
+                            if xml_conn.get('CATALOG'):
+                                conn_info['project'] = conn_info.get('project') or xml_conn.get('CATALOG', '')
+                                conn_info['server'] = conn_info.get('server') or xml_conn.get('CATALOG', '')
+                            if xml_conn.get('EXECCATALOG'):
+                                conn_info['billing_project'] = xml_conn.get('EXECCATALOG', '')
                             if xml_conn.get('project'):
                                 conn_info['project'] = xml_conn.get('project', '')
                                 conn_info['server'] = xml_conn.get('project', '')  # Use project as server for display
                             if xml_conn.get('schema'):
                                 conn_info['dataset'] = xml_conn.get('schema', '')
                                 conn_info['dbname'] = xml_conn.get('schema', '')  # Use schema as dbname for display
-                            if xml_conn.get('CATALOG'):
-                                conn_info['project'] = conn_info.get('project') or xml_conn.get('CATALOG', '')
-                                conn_info['server'] = conn_info.get('server') or xml_conn.get('CATALOG', '')
+                            if xml_conn.get('authentication'):
+                                conn_info['authentication'] = xml_conn.get('authentication', '')
+                            if xml_conn.get('connection-dialect'):
+                                conn_info['connection_dialect'] = xml_conn.get('connection-dialect', '')
                             if xml_conn.get('username'):
                                 conn_info['username'] = xml_conn.get('username', '')
+                            if xml_conn.get('server-oauth'):
+                                conn_info['server_oauth'] = xml_conn.get('server-oauth', '')
                 
                 # For BigQuery, use project as the primary identifier if dbname is empty
                 if conn_info['dbclass'] == 'bigquery' and not conn_info['dbname'] and conn_info.get('project'):
@@ -284,10 +296,25 @@ class TableauMigrator:
                                 break
                         
                         print(f"         - {rel_name} ({db_type})")
+                        # Generate meaningful connection description
+                        connection_desc = connection_id
+                        if db_type == 'bigquery':
+                            # Try to get BigQuery connection details from existing connection info
+                            for conn_info in ds_info['connections']:
+                                if conn_info.get('dbclass') == 'bigquery':
+                                    billing_project = conn_info.get('billing_project')
+                                    project = conn_info.get('project')
+                                    dataset = conn_info.get('dataset')
+                                    if billing_project and dataset:
+                                        connection_desc = f"BigQuery: {billing_project}.{dataset}"
+                                    elif project and dataset:
+                                        connection_desc = f"BigQuery: {project}.{dataset}"
+                                    break
+                        
                         api_sql_queries.append({
                             'name': rel_name,
                             'sql': sql_text,
-                            'connection': connection_id,
+                            'connection': connection_desc,
                             'type': f'{db_type.title()} Custom SQL via Document API'
                         })
                 
@@ -340,7 +367,36 @@ class TableauMigrator:
                             
                             # Generate appropriate SQL for the table reference
                             if db_type == 'bigquery':
-                                generated_sql = f'SELECT * FROM `{table_name}`;'
+                                # For BigQuery, format as billing_project.dataset.table
+                                # Get billing project from connection info
+                                billing_project = None
+                                dataset = None
+                                for conn in datasource.connections:
+                                    if conn.dbclass == 'bigquery':
+                                        # Try to get from connection info extracted earlier
+                                        for conn_info in ds_info['connections']:
+                                            if conn_info.get('dbclass') == 'bigquery':
+                                                billing_project = conn_info.get('billing_project') or conn_info.get('project')
+                                                dataset = conn_info.get('dataset')
+                                                break
+                                        break
+                                
+                                # Format the table name properly for BigQuery
+                                if billing_project and dataset:
+                                    # Clean the table name - remove any existing brackets or backticks
+                                    clean_table = table_name.replace('[', '').replace(']', '').replace('`', '')
+                                    # Extract just the table name part if it's in format like publicdata.samples.shakespeare
+                                    if '.' in clean_table:
+                                        table_parts = clean_table.split('.')
+                                        actual_table = table_parts[-1]  # Get the last part (table name)
+                                    else:
+                                        actual_table = clean_table
+                                    
+                                    bigquery_table = f'`{billing_project}.{dataset}.{actual_table}`'
+                                    generated_sql = f'SELECT * FROM {bigquery_table};'
+                                else:
+                                    # Fallback to original format if we can't get billing project
+                                    generated_sql = f'SELECT * FROM `{table_name}`;'
                             elif db_type in ['postgres', 'mysql']:
                                 generated_sql = f'SELECT * FROM "{table_name}";'
                             elif db_type == 'sqlserver':
@@ -348,11 +404,26 @@ class TableauMigrator:
                             else:
                                 generated_sql = f'SELECT * FROM {table_name};'
                             
+                            # Format the table name for display in the name field
+                            if db_type == 'bigquery' and billing_project and dataset:
+                                display_table_name = f'`{billing_project}.{dataset}.{actual_table}`'
+                            else:
+                                display_table_name = table_name
+                            
+                            # Generate meaningful connection description for table connections
+                            connection_desc = connection_id
+                            if db_type == 'bigquery':
+                                # Use the same BigQuery connection details we already extracted
+                                if billing_project and dataset:
+                                    connection_desc = f"BigQuery: {billing_project}.{dataset}"
+                                elif project and dataset:
+                                    connection_desc = f"BigQuery: {project}.{dataset}"
+                            
                             print(f"         - Table: {table_name} ({db_type})")
                             api_sql_queries.append({
-                                'name': f'Table: {table_name}',
+                                'name': f'Table: {display_table_name}',
                                 'sql': f'-- Direct table connection\n-- Connect to: {server_info}\n-- Table: {table_name}\n\n{generated_sql}',
-                                'connection': connection_id,
+                                'connection': connection_desc,
                                 'type': f'{db_type.title()} Table Connection via Document API'
                             })
                     
@@ -415,9 +486,12 @@ class TableauMigrator:
         
         # Export dashboard usage CSV
         print("📋 Exporting dashboard usage CSV...")
-        # Only export dashboard usage for the first datasource to avoid duplicates
-        if data_sources and data_sources[0].get('dashboard_info'):
-            self.csv_exporter.export_dashboard_usage_csv('output', data_sources, data_sources[0]['dashboard_info'])
+        # Use dashboard info from any datasource (they all have the same workbook-level dashboard info)
+        if data_sources:
+            for ds in data_sources:
+                if ds.get('dashboard_info'):
+                    self.csv_exporter.export_dashboard_usage_csv('output', data_sources, ds['dashboard_info'])
+                    break  # Only need to export once since dashboard info is workbook-level
         
         # Export hyper data to Excel (if any exists and not skipped)
         if not skip_hyper_data:

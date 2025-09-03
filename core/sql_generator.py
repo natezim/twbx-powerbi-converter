@@ -312,14 +312,32 @@ class SQLGenerator:
     def _extract_connection_info(self, conn, conn_class, caption):
         """Extract connection information based on connection class."""
         if conn_class == 'bigquery':
-            project = conn.get('project', '') or conn.get('CATALOG', '') or conn.get('EXECCATALOG', '')
-            schema = conn.get('schema', '')
+            # Extract all BigQuery-specific attributes
+            catalog = conn.get('CATALOG', '')  # Project
+            exec_catalog = conn.get('EXECCATALOG', '')  # Billing Project
+            project = conn.get('project', '') or catalog
+            schema = conn.get('schema', '')  # Dataset
+            authentication = conn.get('authentication', '')
+            connection_dialect = conn.get('connection-dialect', '')
+            username = conn.get('username', '')
+            server_oauth = conn.get('server-oauth', '')
             
-            if project:
+            if project or exec_catalog:
                 info = f'-- BigQuery Connection: {caption}\n'
-                info += f'-- Project: {project}\n'
+                if exec_catalog:
+                    info += f'-- Billing Project: {exec_catalog}\n'
+                if project:
+                    info += f'-- Project: {project}\n'
                 if schema:
-                    info += f'-- Schema: {schema}\n'
+                    info += f'-- Dataset: {schema}\n'
+                if authentication:
+                    info += f'-- Authentication: {authentication}\n'
+                if connection_dialect:
+                    info += f'-- Connection Dialect: {connection_dialect}\n'
+                if username:
+                    info += f'-- Username: {username}\n'
+                if server_oauth:
+                    info += f'-- Server OAuth: {server_oauth}\n'
                 info += '-- Use BigQuery connector in Power BI'
                 return info
                 
