@@ -22,7 +22,8 @@ import platform
 sys.path.append(os.path.join(os.path.dirname(__file__), 'core'))
 
 from main import TableauMigrator
-from field_extractor import FieldExtractor
+from core.field_extractor import FieldExtractor
+from core.enhanced_migrator import EnhancedTableauMigrator
 
 
 class ImprovedTableauConverterGUI:
@@ -34,6 +35,7 @@ class ImprovedTableauConverterGUI:
         # Initialize variables
         self.selected_file = None
         self.migrator = None
+        self.enhanced_migrator = None
         self.data_sources = []
         self.current_analysis = None
 
@@ -64,53 +66,41 @@ class ImprovedTableauConverterGUI:
         
         ttk.Button(file_frame, text="Browse", command=self.browse_file).grid(row=0, column=1)
         
-        # Datasource selection section
-        ttk.Label(main_frame, text="Datasource:", font=('Arial', 12, 'bold')).grid(row=2, column=0, sticky=tk.W, pady=(10, 5))
-        
-        self.datasource_var = tk.StringVar()
-        self.datasource_combo = ttk.Combobox(main_frame, textvariable=self.datasource_var, state="readonly", width=50)
-        self.datasource_combo.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
-        self.datasource_combo.bind('<<ComboboxSelected>>', self.on_datasource_selected)
-        
-        # Datasource info section
-        ttk.Label(main_frame, text="Datasource Info:", font=('Arial', 12, 'bold')).grid(row=4, column=0, sticky=tk.W, pady=(10, 5))
-        
-        self.info_text = scrolledtext.ScrolledText(main_frame, height=8, width=80)
-        self.info_text.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        # Removed datasource dropdown and info section for streamlined version
         
         # Action buttons section
         button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=6, column=0, columnspan=2, pady=20)
+        button_frame.grid(row=2, column=0, columnspan=2, pady=20)
         
-        self.analyze_btn = ttk.Button(button_frame, text="🔍 Analyze Tableau", command=self.analyze_twbx, style="Accent.TButton")
+        self.analyze_btn = ttk.Button(button_frame, text="🚀 Analyze & Extract All Data", command=self.analyze_twbx, style="Accent.TButton")
         self.analyze_btn.pack(side=tk.LEFT, padx=(0, 10))
         
         self.extract_btn = ttk.Button(button_frame, text="📊 Extract Hyper Data", command=self.extract_hyper_data, state="disabled")
         self.extract_btn.pack(side=tk.LEFT)
         
         # Progress section
-        ttk.Label(main_frame, text="Progress:", font=('Arial', 12, 'bold')).grid(row=7, column=0, sticky=tk.W, pady=(20, 5))
+        ttk.Label(main_frame, text="Progress:", font=('Arial', 12, 'bold')).grid(row=3, column=0, sticky=tk.W, pady=(20, 5))
         
         self.progress_var = tk.StringVar(value="Ready")
         self.progress_label = ttk.Label(main_frame, textvariable=self.progress_var, foreground="blue")
-        self.progress_label.grid(row=8, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
+        self.progress_label.grid(row=4, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
         
         self.progress_bar = ttk.Progressbar(main_frame, mode='indeterminate')
-        self.progress_bar.grid(row=9, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        self.progress_bar.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         
         # Log section
-        ttk.Label(main_frame, text="Log:", font=('Arial', 12, 'bold')).grid(row=10, column=0, sticky=tk.W, pady=(10, 5))
+        ttk.Label(main_frame, text="Log:", font=('Arial', 12, 'bold')).grid(row=6, column=0, sticky=tk.W, pady=(10, 5))
         
         self.log_text = scrolledtext.ScrolledText(main_frame, height=12, width=80)
-        self.log_text.grid(row=11, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        self.log_text.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
         
         # Configure row weights for proper resizing
-        main_frame.rowconfigure(11, weight=1)
+        main_frame.rowconfigure(7, weight=1)
         
         # Status bar
         self.status_var = tk.StringVar(value="Ready")
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
-        status_bar.grid(row=12, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+        status_bar.grid(row=8, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
         
     def browse_file(self):
         """Browse for TWBX or TWB file."""
@@ -127,13 +117,11 @@ class ImprovedTableauConverterGUI:
             # Reset state
             self.data_sources = []
             self.current_analysis = None
-            self.datasource_combo.set('')
-            self.datasource_combo['values'] = []
-            self.info_text.delete(1.0, tk.END)
             self.extract_btn.config(state="disabled")
             
             # Enable analyze button
             self.analyze_btn.config(state="normal")
+
             
     def analyze_twbx(self):
         """Analyze the TWBX file to extract metadata."""
@@ -146,11 +134,10 @@ class ImprovedTableauConverterGUI:
         self.extract_btn.config(state="disabled")
         
         # Start progress
-        self.progress_var.set("Analyzing TWBX file...")
+        self.progress_var.set("Analyzing and extracting all data...")
         self.progress_bar.start()
         
         # Clear previous results
-        self.info_text.delete(1.0, tk.END)
         self.log_text.delete(1.0, tk.END)
         
         # Run analysis in separate thread
@@ -159,43 +146,35 @@ class ImprovedTableauConverterGUI:
         thread.start()
         
     def _analyze_twbx_thread(self):
-        """Run TWBX analysis in background thread."""
+        """Run comprehensive analysis and extraction in background thread."""
         try:
-            # Initialize migrator
-            self.migrator = TableauMigrator()
+            # Initialize enhanced migrator for comprehensive extraction
+            self.enhanced_migrator = EnhancedTableauMigrator()
             
-            # Process the file (skip Hyper extraction for analysis mode)
-            self.data_sources = self.migrator.process_twbx_file(self.selected_file, skip_hyper_extraction=True)
+            # Perform comprehensive extraction (streamlined - single JSON file only)
+            comprehensive_data = self.enhanced_migrator.process_tableau_file_comprehensive(
+                self.selected_file, 
+                output_format="json"
+            )
             
-            if self.data_sources:
-                # Export regular results (CSV, setup guides) but skip Hyper data
-                try:
-                    self.migrator.export_results(self.data_sources, skip_hyper_data=True)
-                    # Update GUI on main thread
-                    self.root.after(0, self._analysis_complete)
-                except Exception as e:
-                    self.root.after(0, self._analysis_failed, f"Failed to export results: {str(e)}")
+            if comprehensive_data:
+                # Update GUI on main thread with comprehensive data
+                self.root.after(0, self._analysis_complete, comprehensive_data)
             else:
-                self.root.after(0, self._analysis_failed, "Failed to process TWBX file")
+                self.root.after(0, self._analysis_failed, "Failed to extract comprehensive data")
                 
         except Exception as e:
             self.root.after(0, self._analysis_failed, str(e))
     
-    def _analysis_complete(self):
-        """Handle successful analysis completion."""
+    def _analysis_complete(self, comprehensive_data):
+        """Handle successful comprehensive analysis and extraction completion."""
         self.progress_bar.stop()
-        self.progress_var.set("Analysis complete!")
+        self.progress_var.set("Analysis and extraction complete!")
         
-        # Populate datasource dropdown
-        datasource_names = []
-        for ds in self.data_sources:
-            name = ds.get('caption') or ds.get('name') or 'Unknown'
-            datasource_names.append(name)
+        # Store the comprehensive data
+        self.current_analysis = comprehensive_data
         
-        self.datasource_combo['values'] = datasource_names
-        if datasource_names:
-            self.datasource_combo.set(datasource_names[0])
-            self.on_datasource_selected()
+        # No need for datasource dropdown in streamlined version
         
         # Enable buttons
         self.analyze_btn.config(state="normal")
@@ -203,25 +182,154 @@ class ImprovedTableauConverterGUI:
         self.extract_btn.config(state="normal")
         
         # Update status
-        self.status_var.set(f"Analysis complete: {len(self.data_sources)} datasource(s) found")
+        self.status_var.set("Analysis and extraction complete - Ready for Hyper data extraction")
         
-        # Log success
-        self.log_text.insert(tk.END, f"✅ Analysis complete!\n")
-        self.log_text.insert(tk.END, f"Found {len(self.data_sources)} datasource(s)\n")
-        self.log_text.insert(tk.END, f"✅ Regular files exported (CSV, setup guides)\n")
+        # Log success with detailed summary
+        self.log_text.insert(tk.END, f"✅ Analysis and extraction complete!\n")
+        self.log_text.insert(tk.END, f"{'='*60}\n")
         
-        # Check if any datasources have missing Hyper API dependency
-        missing_hyper_api = False
-        for ds in self.data_sources:
-            if ds.get('hyper_data') and ds['hyper_data'].get("__missing_dependency__"):
-                missing_hyper_api = True
-                break
+        # Get summary info
+        workbook_info = comprehensive_data.get("workbook_info", {})
+        workbook_metadata = comprehensive_data.get("workbook_metadata", {})
+        worksheets = comprehensive_data.get("worksheets", [])
+        dashboards = comprehensive_data.get("dashboards", [])
+        fields_comp = comprehensive_data.get("fields_comprehensive", {})
+        datasources = comprehensive_data.get("datasources", [])
         
-        if missing_hyper_api:
-            self.log_text.insert(tk.END, f"⚠️ Note: Some datasources have Hyper data but tableauhyperapi is not installed\n")
-            self.log_text.insert(tk.END, f"   Install with: pip install tableauhyperapi to enable Hyper data extraction\n")
+        # Basic summary
+        self.log_text.insert(tk.END, f"📊 WORKBOOK SUMMARY:\n")
+        self.log_text.insert(tk.END, f"   Name: {workbook_info.get('name', workbook_metadata.get('name', 'Unknown'))}\n")
+        self.log_text.insert(tk.END, f"   Author: {workbook_metadata.get('author', 'Unknown')}\n")
+        self.log_text.insert(tk.END, f"   Version: {workbook_metadata.get('version', 'Unknown')}\n")
+        self.log_text.insert(tk.END, f"   Modified: {workbook_metadata.get('modified_date', 'Unknown')}\n")
+        self.log_text.insert(tk.END, f"   Complexity: {workbook_info.get('complexity_score', workbook_metadata.get('complexity_score', 'Unknown'))}\n")
+        self.log_text.insert(tk.END, f"\n📈 CONTENT OVERVIEW:\n")
+        self.log_text.insert(tk.END, f"   Worksheets: {len(worksheets)}\n")
+        self.log_text.insert(tk.END, f"   Dashboards: {len(dashboards)}\n")
+        self.log_text.insert(tk.END, f"   Data Sources: {len(datasources)}\n")
+        self.log_text.insert(tk.END, f"   Total Fields: {fields_comp.get('total_fields', 0)}\n")
+        self.log_text.insert(tk.END, f"   Calculated Fields: {len(fields_comp.get('calculated_fields', []))}\n")
+        self.log_text.insert(tk.END, f"   Parameters: {len(fields_comp.get('parameters', []))}\n")
+        self.log_text.insert(tk.END, f"\n📄 OUTPUT FILES:\n")
+        self.log_text.insert(tk.END, f"   • Comprehensive JSON: All data in one file\n")
+        self.log_text.insert(tk.END, f"   • Thumbnail screenshots: Visual previews\n")
         
+        # Show detailed connection info
+        self.log_text.insert(tk.END, f"\n🔌 DATA SOURCE CONNECTIONS:\n")
+        for i, ds in enumerate(datasources, 1):
+            ds_name = ds.get('caption', 'Unknown')
+            ds_id = ds.get('name', 'Unknown')
+            field_count = ds.get('field_count', 0)
+            
+            self.log_text.insert(tk.END, f"   {i}. {ds_name}\n")
+            self.log_text.insert(tk.END, f"      ID: {ds_id}\n")
+            self.log_text.insert(tk.END, f"      Fields: {field_count}\n")
+            
+            # Show connections
+            connections = ds.get('connections', [])
+            if connections:
+                for conn in connections:
+                    conn_type = conn.get('class', 'Unknown')
+                    username = conn.get('username', 'Unknown')
+                    
+                    # Try different connection field formats
+                    catalog = conn.get('CATALOG', conn.get('catalog', ''))
+                    exec_catalog = conn.get('EXECCATALOG', conn.get('exec_catalog', ''))
+                    project = conn.get('project', '')
+                    server = conn.get('server', '')
+                    dbname = conn.get('dbname', '')
+                    
+                    # Build connection display
+                    if catalog and exec_catalog:
+                        self.log_text.insert(tk.END, f"      Connection: {conn_type} → {catalog} (Exec: {exec_catalog})\n")
+                    elif project:
+                        self.log_text.insert(tk.END, f"      Connection: {conn_type} → Project: {project}\n")
+                    elif server and dbname:
+                        self.log_text.insert(tk.END, f"      Connection: {conn_type} → {server}/{dbname}\n")
+                    else:
+                        self.log_text.insert(tk.END, f"      Connection: {conn_type}\n")
+                    
+                    if username and username != 'Unknown':
+                        self.log_text.insert(tk.END, f"      User: {username}\n")
+            else:
+                self.log_text.insert(tk.END, f"      Connection: No connection details\n")
+            self.log_text.insert(tk.END, f"\n")
+        
+        # Show field breakdown
+        self.log_text.insert(tk.END, f"\n📊 FIELD BREAKDOWN:\n")
+        regular_fields = fields_comp.get('regular_fields', [])
+        calculated_fields = fields_comp.get('calculated_fields', [])
+        parameters = fields_comp.get('parameters', [])
+        
+        self.log_text.insert(tk.END, f"   • Regular Fields: {len(regular_fields)}\n")
+        self.log_text.insert(tk.END, f"   • Calculated Fields: {len(calculated_fields)}\n")
+        self.log_text.insert(tk.END, f"   • Parameters: {len(parameters)}\n")
+        
+        # Show sample fields from each datasource using field_metadata
+        self.log_text.insert(tk.END, f"\n📋 SAMPLE FIELDS BY DATASOURCE:\n")
+        field_metadata = comprehensive_data.get("workbook_metadata", {}).get("field_metadata", {})
+        all_fields = field_metadata.get("all_fields", [])
+        
+        # Group fields by datasource
+        fields_by_datasource = {}
+        for field in all_fields:
+            ds_name = field.get('datasource', 'Unknown')
+            if ds_name not in fields_by_datasource:
+                fields_by_datasource[ds_name] = []
+            fields_by_datasource[ds_name].append(field)
+        
+        # Show sample fields for each datasource
+        for ds in datasources:
+            ds_name = ds.get('caption', 'Unknown')
+            ds_id = ds.get('name', 'Unknown')
+            
+            # Find fields for this datasource
+            ds_fields = fields_by_datasource.get(ds_id, [])
+            if ds_fields:
+                sample_fields = ds_fields[:5]  # Show first 5 fields
+                field_names = [f.get('caption', f.get('name', 'Unknown')) for f in sample_fields]
+                self.log_text.insert(tk.END, f"   • {ds_name}: {', '.join(field_names)}\n")
+                if len(ds_fields) > 5:
+                    self.log_text.insert(tk.END, f"     ... and {len(ds_fields) - 5} more fields\n")
+            else:
+                self.log_text.insert(tk.END, f"   • {ds_name}: No fields found\n")
+        
+        # Show worksheet details
+        self.log_text.insert(tk.END, f"\n📊 WORKSHEET DETAILS:\n")
+        for ws in worksheets:
+            ws_name = ws.get('name', 'Unknown')
+            chart_type = ws.get('chart_type', 'Unknown')
+            fields_used = ws.get('fields_used', [])
+            filters = ws.get('filters', [])
+            
+            self.log_text.insert(tk.END, f"   • {ws_name} ({chart_type})\n")
+            self.log_text.insert(tk.END, f"     - Fields used: {len(fields_used)}\n")
+            self.log_text.insert(tk.END, f"     - Filters: {len(filters)}\n")
+            
+            # Show sample fields used
+            if fields_used:
+                sample_field_names = [f.get('caption', f.get('name', 'Unknown')) for f in fields_used[:3]]
+                self.log_text.insert(tk.END, f"     - Sample fields: {', '.join(sample_field_names)}\n")
+                if len(fields_used) > 3:
+                    self.log_text.insert(tk.END, f"       ... and {len(fields_used) - 3} more\n")
+            
+            # Show filter details if any
+            if filters:
+                filter_names = [f.get('caption', f.get('name', 'Unknown')) for f in filters[:2]]
+                self.log_text.insert(tk.END, f"     - Sample filters: {', '.join(filter_names)}\n")
+                if len(filters) > 2:
+                    self.log_text.insert(tk.END, f"       ... and {len(filters) - 2} more\n")
         self.log_text.see(tk.END)
+        
+        # Show success message
+        messagebox.showinfo("Analysis and Extraction Complete", 
+                          f"Successfully analyzed and extracted all data!\n\n"
+                          f"Workbook: {workbook_metadata.get('name', 'Unknown')}\n"
+                          f"Worksheets: {len(worksheets)}\n"
+                          f"Dashboards: {len(dashboards)}\n"
+                          f"Data Sources: {len(datasources)}\n"
+                          f"Total Fields: {fields_comp.get('total_fields', 0)}\n\n"
+                          f"All data exported to a single comprehensive JSON file.")
     
     def _analysis_failed(self, error_msg):
         """Handle analysis failure."""
@@ -230,6 +338,7 @@ class ImprovedTableauConverterGUI:
         
         # Re-enable analyze button
         self.analyze_btn.config(state="normal")
+
         
         # Show error
         messagebox.showerror("Analysis Error", f"Failed to analyze TWBX file:\n{error_msg}")
@@ -239,98 +348,20 @@ class ImprovedTableauConverterGUI:
         self.log_text.insert(tk.END, f"❌ Analysis failed: {error_msg}\n")
         self.log_text.see(tk.END)
     
-    def on_datasource_selected(self, event=None):
-        """Handle datasource selection."""
-        selected_name = self.datasource_var.get()
-        if not selected_name or not self.data_sources:
-            return
-        
-        # Find the selected datasource
-        selected_ds = None
-        for ds in self.data_sources:
-            name = ds.get('caption') or ds.get('name') or 'Unknown'
-            if name == selected_name:
-                selected_ds = ds
-                break
-        
-        if selected_ds:
-            self._display_datasource_info(selected_ds)
+    # Removed datasource selection methods for streamlined version
     
-    def _display_datasource_info(self, datasource):
-        """Display information about the selected datasource."""
-        self.info_text.delete(1.0, tk.END)
-        
-        # Basic info
-        info = f"📊 DATASOURCE INFORMATION\n"
-        info += f"{'='*50}\n\n"
-        info += f"Name: {datasource.get('name', 'N/A')}\n"
-        info += f"Caption: {datasource.get('caption', 'N/A')}\n"
-        info += f"Fields: {datasource.get('field_count', 0)}\n"
-        
-        # Connection info
-        if datasource.get('connections'):
-            info += f"\n🔌 CONNECTIONS:\n"
-            for i, conn in enumerate(datasource['connections'], 1):
-                info += f"  {i}. Type: {conn.get('dbclass', 'N/A')}\n"
-                if conn.get('server'):
-                    info += f"     Server: {conn.get('server')}\n"
-                if conn.get('dbname'):
-                    info += f"     Database: {conn.get('dbname')}\n"
-                if conn.get('username'):
-                    info += f"     Username: {conn.get('username')}\n"
-                info += "\n"
-        
-        # Field summary
-        fields = datasource.get('fields', [])
-        if fields:
-            used_fields = sum(1 for f in fields if f.get('used_in_workbook', False))
-            calc_fields = sum(1 for f in fields if f.get('is_calculated', False))
-            param_fields = sum(1 for f in fields if f.get('is_parameter', False))
-            
-            info += f"📋 FIELDS SUMMARY:\n"
-            info += f"  Total: {len(fields)}\n"
-            info += f"  Used in workbook: {used_fields}\n"
-            info += f"  Calculated: {calc_fields}\n"
-            info += f"  Parameters: {param_fields}\n"
-        
-        # Hyper data info
-        if datasource.get('hyper_data'):
-            # Check if Hyper API dependency is missing
-            if datasource['hyper_data'].get("__missing_dependency__"):
-                info += f"\n⚠️ HYPER DATA EXTRACTION:\n"
-                info += f"  Status: Skipped - {datasource['hyper_data']['__missing_dependency__']} not available\n"
-                info += f"  Install with: pip install tableauhyperapi\n"
-            else:
-                hyper_tables = len(datasource['hyper_data'])
-                total_rows = sum(table_info['row_count'] for table_info in datasource['hyper_data'].values())
-                info += f"\n💾 HYPER DATA:\n"
-                info += f"  Tables: {hyper_tables}\n"
-                info += f"  Total rows: {total_rows:,}\n"
-        
-        self.info_text.insert(1.0, info)
+    # Removed _display_datasource_info method for streamlined version
     
     def extract_hyper_data(self):
-        """Extract Hyper data from the selected datasource."""
-        if not self.data_sources or not self.datasource_var.get():
-            messagebox.showerror("Error", "Please analyze a TWBX file first and select a datasource.")
+        """Extract Hyper data from the analyzed datasources."""
+        if not self.current_analysis:
+            messagebox.showerror("Error", "Please analyze a TWBX file first.")
             return
         
-        # Check if the selected datasource has Hyper data and if it's available
-        selected_name = self.datasource_var.get()
-        selected_ds = None
-        for ds in self.data_sources:
-            name = ds.get('caption') or ds.get('name') or 'Unknown'
-            if name == selected_name:
-                selected_ds = ds
-                break
-        
-        if selected_ds and selected_ds.get('hyper_data'):
-            if selected_ds['hyper_data'].get("__missing_dependency__"):
-                missing_dep = selected_ds['hyper_data']['__missing_dependency__']
-                messagebox.showwarning("Missing Dependency", 
-                    f"Hyper data extraction requires {missing_dep}.\n\n"
-                    f"Install with: pip install {missing_dep}\n\n"
-                    "After installation, restart the application and try again.")
+        # For now, just show a message that Hyper extraction is not implemented in streamlined version
+        messagebox.showinfo("Hyper Data Extraction", 
+            "Hyper data extraction is not available in the streamlined version.\n\n"
+            "All data has been extracted to the comprehensive JSON file.")
                 return
         
         # Disable buttons during extraction
@@ -351,7 +382,7 @@ class ImprovedTableauConverterGUI:
         try:
             # First, we need to extract Hyper data from the TWBX file
             # Process the file again but this time WITH Hyper extraction
-            self.data_sources = self.migrator.process_twbx_file(self.selected_file, skip_hyper_extraction=False)
+            self.data_sources = self.migrator.process_tableau_file(self.selected_file, skip_hyper_extraction=False)
             
             if not self.data_sources:
                 self.root.after(0, self._extraction_failed, "Failed to process TWBX file for Hyper data extraction")
@@ -439,6 +470,8 @@ class ImprovedTableauConverterGUI:
         # Log error
         self.log_text.insert(tk.END, f"❌ Data extraction failed: {error_msg}\n")
         self.log_text.see(tk.END)
+    
+
     
 
 

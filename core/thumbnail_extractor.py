@@ -151,7 +151,7 @@ class ThumbnailExtractor:
     def _create_safe_filename(self, original_name: str, screenshots_dir: str, 
                               thumbnail_number: int) -> str:
         """
-        Create a filesystem-safe filename, handling duplicates.
+        Create a filesystem-safe filename, overwriting existing files.
         
         Args:
             original_name: Original thumbnail name from XML
@@ -168,17 +168,8 @@ class ThumbnailExtractor:
         if not safe_name or safe_name.isspace():
             safe_name = f"Thumbnail_{thumbnail_number}"
         
-        # Add .png extension
-        base_filename = f"{safe_name}.png"
-        
-        # Handle duplicates by appending numbers
-        filename = base_filename
-        counter = 1
-        
-        while os.path.exists(os.path.join(screenshots_dir, filename)):
-            name_part = safe_name
-            filename = f"{name_part}_{counter}.png"
-            counter += 1
+        # Add .png extension and return (will overwrite existing files)
+        filename = f"{safe_name}.png"
         
         return filename
     
