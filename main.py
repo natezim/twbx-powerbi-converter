@@ -10,7 +10,7 @@ from core.field_extractor import FieldExtractor
 from core.sql_generator import SQLGenerator
 from core.csv_exporter import CSVExporter
 from core.thumbnail_extractor import ThumbnailExtractor
-from utils.file_utils import find_tableau_files, find_twbx_files, create_safe_filename, ensure_directory_exists, validate_tableau_file, validate_twbx_file
+from core.file_utils import find_tableau_files, find_twbx_files, create_safe_filename, ensure_directory_exists, validate_tableau_file, validate_twbx_file
 
 
 class TableauMigrator:

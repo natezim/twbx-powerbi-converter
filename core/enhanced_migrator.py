@@ -15,7 +15,7 @@ from .field_extractor import FieldExtractor
 from .sql_generator import SQLGenerator
 from .csv_exporter import CSVExporter
 from .thumbnail_extractor import ThumbnailExtractor
-from utils.file_utils import ensure_directory_exists
+from .file_utils import ensure_directory_exists
 
 
 class EnhancedTableauMigrator:

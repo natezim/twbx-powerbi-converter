@@ -6,7 +6,7 @@ Handles export of field mapping data to CSV format
 
 import os
 import csv
-from utils.file_utils import create_safe_filename
+from .file_utils import create_safe_filename
 
 
 class CSVExporter:

@@ -237,9 +237,8 @@ twbx-powerbi-converter/
 │   ├── sql_generator.py             # SQL and relationship extraction
 │   ├── csv_exporter.py              # Legacy output generation
 │   ├── thumbnail_extractor.py       # Screenshot extraction
+│   ├── file_utils.py                # File handling utilities
 │   └── tableaudocumentapi/          # Official Tableau Document API
-├── utils/
-│   └── file_utils.py                # File handling utilities
 ├── output/                          # Generated files (gitignored)
 ├── requirements.txt                 # Python dependencies
 └── README.md                        # This file
