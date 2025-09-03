@@ -362,7 +362,7 @@ class ImprovedTableauConverterGUI:
         messagebox.showinfo("Hyper Data Extraction", 
             "Hyper data extraction is not available in the streamlined version.\n\n"
             "All data has been extracted to the comprehensive JSON file.")
-                return
+        return
         
         # Disable buttons during extraction
         self.extract_btn.config(state="disabled")
